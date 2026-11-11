@@ -1,0 +1,8 @@
+# What this app is. The site decides who may see it, in a separate file
+# alongside the deployed bundle -- see README.md.
+#
+# There is deliberately no `groups` key here and no `id`. Groups are the
+# operator's to set; the id comes from the bundle's file name.
+name: Example Pipeline
+description: Drop input files, pick a pipeline, submit.
+icon: beaker
