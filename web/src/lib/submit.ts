@@ -32,6 +32,16 @@
 //     returns an empty-but-present file, so the job fails with its
 //     real error instead of a misleading hold.
 
+/**
+ * Files the job brings back, declared and pre-created from one list.
+ *
+ * ONE list, not two: a declaration and a creation that can drift apart
+ * is the bug this whole arrangement exists to prevent. Declare a file
+ * the job never creates and HTCondor holds it; create one you never
+ * declare and it is thrown away with the sandbox.
+ */
+export const OUTPUT_FILES = ['results.json'] as const;
+
 /** Knobs this example exposes. Replace with your own. */
 export interface RunOptions {
   pipeline: string;
@@ -74,12 +84,12 @@ export function isSafeFileName(name: string): boolean {
 export function buildSubmitFile(opts: RunOptions): string {
   const inputs = opts.inputNames.filter(isSafeFileName).map(quote);
 
-  // Note the `: > results.json` before any real work: see the comment
-  // at the top of this file. The job creates its structured output
-  // first so that a failure is reported as the failure it was, not as
-  // a hold for a missing file.
+  // Note the `: >` before any real work: see the comment at the top of
+  // this file. The job creates its structured output first so that a
+  // failure is reported as the failure it was, not as a hold for a
+  // missing file.
   const script = [
-    `: > results.json`,
+    ...OUTPUT_FILES.map((f) => `: > ${f}`),
     `echo running ${quote(opts.pipeline)} on ${inputs.length} file(s)`,
     `ls -l`,
     // Whatever the real work is, have it end by writing JSON the page
@@ -104,7 +114,7 @@ export function buildSubmitFile(opts: RunOptions): string {
     `error = stderr.txt`,
     // Declared, so it comes back -- and created at the start of the
     // job, so declaring it cannot turn a failure into a hold.
-    `transfer_output_files = results.json`,
+    `transfer_output_files = ${OUTPUT_FILES.join(',')}`,
     ``,
     // A batch name is how the app finds its own jobs later without
     // keeping a database: the queue is the record.

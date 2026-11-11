@@ -76,7 +76,7 @@ e2e: install bundle ## Playwright against a demo API server in Docker
 # valid JSON.
 openapi: ## Refresh openapi.json from a running server (API=https://...)
 	@curl -ksSf "$(API)/openapi.json" -o openapi.json.new
-	@python3 -c "import json,sys; json.load(open('openapi.json.new'))" 		|| { echo "not valid JSON; leaving openapi.json alone"; rm -f openapi.json.new; exit 1; }
+	@python3 -c "import json; d=json.load(open('openapi.json.new')); assert 'paths' in d and 'components' in d, 'not an OpenAPI document'" || { echo "not an OpenAPI document; leaving openapi.json alone"; rm -f openapi.json.new; exit 1; }
 	@mv openapi.json.new openapi.json
 	@echo "openapi.json refreshed from $(API)"
 

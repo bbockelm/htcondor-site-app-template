@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildSubmitFile, quote, isSafeFileName } from './submit';
+import { buildSubmitFile, quote, isSafeFileName, OUTPUT_FILES } from './submit';
 
 // The effective value of a submit command is the LAST assignment before
 // `queue`, which is what the submit processor evaluates. Asserting on
@@ -98,9 +98,23 @@ function commandNames(submitFile: string): string[] {
 describe('output files', () => {
   const base = { pipeline: 'align', inputNames: ['a.txt'], cpus: 1, memoryMB: 512 };
 
-  it('declares its structured output so it comes back', () => {
-    expect(commandNames(buildSubmitFile(base))).toContain('transfer_output_files');
-    expect(commandValue(buildSubmitFile(base), 'transfer_output_files')).toContain('results.json');
+  it('declares exactly the files it creates, and no others', () => {
+    // toEqual, not toContain. commandValue returns the EFFECTIVE value
+    // -- the last assignment before `queue` -- and a toContain on it
+    // passes even when a stray later line has overridden a correct
+    // earlier one. That is the trap commandValue exists to expose, and
+    // this assertion used to fall straight into it: a merge once left
+    // two transfer_output_files lines and the weaker check stayed
+    // green while one file silently stopped coming back.
+    const declared = (commandValue(buildSubmitFile(base), 'transfer_output_files') ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    expect(declared).toEqual([...OUTPUT_FILES]);
+
+    // And only one such command exists, so nothing can override it.
+    const names = commandNames(buildSubmitFile(base));
+    expect(names.filter((n) => n === 'transfer_output_files')).toHaveLength(1);
   });
 
   // HTCondor holds a job whose declared output file is missing at the
@@ -127,8 +141,14 @@ describe('output files', () => {
     }
   });
 
-  it('emits JSON the page can render, not only prose', () => {
-    expect(buildSubmitFile(base)).toContain('results.json');
-    expect(commandValue(buildSubmitFile(base), 'arguments')).toContain('printf');
+  it('brings back a structured file for the page to render', () => {
+    // Asserts the OUTCOME -- a .json among the declared outputs --
+    // not the mechanism that produces it. An earlier version of this
+    // test required the word "printf" in `arguments`, which is true
+    // of this example and false of any app whose job runs a real
+    // program. A template test that fails when you do the right thing
+    // a different way teaches people to delete tests.
+    const declared = (commandValue(buildSubmitFile(base), 'transfer_output_files') ?? '').split(',');
+    expect(declared.some((f) => f.trim().endsWith('.json'))).toBe(true);
   });
 });

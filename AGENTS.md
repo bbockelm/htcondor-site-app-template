@@ -20,7 +20,15 @@ The endpoints this app uses are wrapped in `web/src/lib/api.ts`. Add to that fil
 
 **Have the job write JSON, not just prose.** A page handed `{"rows": [...]}` can draw a table, sort it, show the top ten. A page handed a block of text can only put it in a `<pre>` and hope. The job is the only thing that knows the shape of its own results, so emit them structured there — one `printf` — and keep the human-readable text as well.
 
-**Create every declared output file at the START of the job.** HTCondor *holds* a job whose declared output file is missing when it finishes. So a job that writes `results.json` only on success is held on every failure — and held for "missing output", which says nothing about what actually went wrong, leaving the user with a job stuck in a state nobody can explain. `: > results.json` before any real work costs nothing and lets failures report themselves. `buildSubmitFile` does this, and a test fails if it stops.
+**Create every declared output file at the START of the job.** HTCondor *holds* a job whose declared output file is missing when it finishes, so a job that writes `results.json` only on success is held on every failure — and held for a transfer error, which says nothing about what actually went wrong. `: > results.json` before any real work costs nothing and lets failures report themselves. `buildSubmitFile` does this from `OUTPUT_FILES`, and a test fails if it stops.
+
+The specifics, from the HTCondor source rather than from memory:
+
+- **The hold is `HoldReasonCode = 13`** (`UploadFileError`), and the reason text is the transfer error, e.g. `Error from slot1@node: error reading from /path/results.json: ...`. It names a file-transfer problem, never the thing your job actually got wrong.
+- **One missing file loses the whole set.** The upload returns on the first file it cannot read, so the other declared outputs do not come back either. Pre-create *all* of them, which is why `OUTPUT_FILES` is one list feeding both the declaration and the `: >` lines.
+- **`when_to_transfer_output = ON_EXIT` still transfers after a non-zero exit.** The starter transfers whenever the job ran to completion on its own; it skips transfer only when the job was told to exit (evicted or removed). So pre-creating the files genuinely protects the failure path — if it did not, this rule would buy nothing where it matters most.
+
+**Keep the structured file small enough to render.** It is what the *page* draws, not an archive. If your results can run to thousands of rows, put the top N in the JSON and the full set in a CSV the user downloads — a browser handed 600 KB of JSON to turn into a table will show it, slowly, and nobody thanks you. The example emits two fields, so it never meets this question; yours will.
 
 **Submit, then upload.** `POST /api/v1/jobs` creates the job; `POST /api/v1/jobs/{id}/input/multipart` sends its input files afterwards. Between the two the job sits in a transferring-input state that users read as "stuck". Do not reorder these, and do surface that state as something other than silence.
 

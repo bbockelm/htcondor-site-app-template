@@ -177,8 +177,15 @@ export const api = {
    * "cancelled" in the interface would be the kind of lie AGENTS.md
    * tells you not to tell.
    */
-  hold: (jobId: string) =>
-    request<void>(`/jobs/${encodeURIComponent(jobId)}/hold`, { method: 'POST' }),
+  hold: (jobId: string, reason = 'Stopped from the web interface') =>
+    request<void>(`/jobs/${encodeURIComponent(jobId)}/hold`, {
+      // The reason comes back as HoldReason, so the interface can tell
+      // a job the user stopped apart from one the pool held. Without
+      // it both read the same, and "say what happened" becomes
+      // impossible for the one case you caused yourself.
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
 
   /** Release a held job so it can run again. */
   release: (jobId: string) =>
