@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { buildSubmitFile, quote, isSafeFileName, OUTPUT_FILES } from './submit';
+import { buildSubmitFile, quote, isSafeFileName, OUTPUT_FILES, jsonString } from './submit';
+import { jobStatusLabel, JOB_ATTRS, HoldReasonCode, type Job } from './api';
 
 // The effective value of a submit command is the LAST assignment before
 // `queue`, which is what the submit processor evaluates. Asserting on
@@ -32,6 +33,15 @@ describe('isSafeFileName', () => {
   it('rejects paths and traversal', () => {
     for (const bad of ['../etc/passwd', 'a/b', '..', '.', '', 'a\nb', 'a,b']) {
       expect(isSafeFileName(bad)).toBe(false);
+    }
+  });
+
+  // These all passed the older "no slashes, no newlines" rule, and
+  // every one is a problem in transfer_input_files, in a multipart
+  // filename, or on a shell command line.
+  it('rejects names that are trouble further down the path', () => {
+    for (const bad of ['my file.fa', "it's.fa", '$(x).fa', '-rf.fa', 'a"b.fa', '`id`.fa', 'a;b.fa']) {
+      expect(isSafeFileName(bad), bad).toBe(false);
     }
   });
 
@@ -124,6 +134,13 @@ describe('output files', () => {
   // nobody can explain. Creating it first makes a failure report
   // itself.
   it('creates every declared output file before any work can fail', () => {
+    // Asserts the PROPERTY, not the mechanism. An earlier version
+    // required the literal `: > results.json` inside `arguments`,
+    // which an app using `executable = my_script.sh` -- the shape the
+    // API's own examples recommend -- cannot satisfy, so it failed
+    // correct implementations. Here we only require that each
+    // declared output is created somewhere the job reaches before it
+    // can fail, and that creation comes before any write.
     const f = buildSubmitFile(base);
     const declared = (commandValue(f, 'transfer_output_files') ?? '')
       .split(',')
@@ -131,12 +148,14 @@ describe('output files', () => {
       .filter(Boolean);
     expect(declared.length).toBeGreaterThan(0);
 
-    const args = commandValue(f, 'arguments') ?? '';
+    // Look through the whole submit file, not one command: the job's
+    // preamble may live in `arguments`, in an uploaded script, or in
+    // a here-doc. If yours lives somewhere this cannot see, assert it
+    // where it does live -- do not delete the test.
     for (const out of declared) {
-      const createdAt = args.indexOf(`: > ${out}`);
+      const createdAt = f.indexOf(`: > ${out}`);
       expect(createdAt, `${out} is declared but never created up front`).toBeGreaterThanOrEqual(0);
-      // ...and created BEFORE it is written, not after.
-      const writtenAt = args.indexOf(`> ${out}`, createdAt + 1);
+      const writtenAt = f.indexOf(`> ${out}`, createdAt + `: > ${out}`.length);
       if (writtenAt >= 0) expect(createdAt).toBeLessThan(writtenAt);
     }
   });
@@ -150,5 +169,60 @@ describe('output files', () => {
     // a different way teaches people to delete tests.
     const declared = (commandValue(buildSubmitFile(base), 'transfer_output_files') ?? '').split(',');
     expect(declared.some((f) => f.trim().endsWith('.json'))).toBe(true);
+  });
+});
+
+describe('job status labels', () => {
+  const base = { ClusterId: 1, ProcId: 0, JobStatus: 5 } as Job;
+
+  // The state every job is in between submit and the input upload.
+  // Rendering it as "Stopped" tells the user their brand-new job
+  // failed -- on every submission, which is the first thing they see.
+  it('does not call a job that is spooling its input "stopped"', () => {
+    const label = jobStatusLabel({
+      ...base,
+      HoldReasonCode: HoldReasonCode.SpoolingInput,
+      HoldReason: 'Spooling input data files',
+    });
+    expect(label.toLowerCase()).not.toContain('stop');
+    expect(label.toLowerCase()).not.toContain('fail');
+    expect(label).toMatch(/upload/i);
+  });
+
+  it('still reports a real hold with its reason', () => {
+    const label = jobStatusLabel({
+      ...base,
+      HoldReasonCode: HoldReasonCode.UploadFileError,
+      HoldReason: 'error reading from results.json',
+    });
+    expect(label).toContain('results.json');
+  });
+
+  // The label can only tell those two apart if the attribute is
+  // requested. It is not in the server's default projection.
+  it('asks for every attribute the labels read', () => {
+    for (const attr of ['JobStatus', 'ExitCode', 'HoldReason', 'HoldReasonCode', 'QDate']) {
+      expect(JOB_ATTRS as readonly string[]).toContain(attr);
+    }
+  });
+});
+
+describe('structured output is valid JSON whatever the user typed', () => {
+  // A job that ran perfectly must not produce results.json the page
+  // cannot parse. The failure would surface in the browser, nowhere
+  // near its cause.
+  it('survives a quote, a backslash and a newline in a user value', () => {
+    for (const nasty of ['a"b', 'a\\\\b', 'a\nb', '"; rm -rf /', 'tab\there']) {
+      const encoded = jsonString(nasty);
+      expect(JSON.parse(encoded)).toBe(nasty);
+      // and it brings its own quotes, so callers must not add more
+      expect(encoded.startsWith('"') && encoded.endsWith('"')).toBe(true);
+    }
+  });
+
+  it('the example submit file embeds the pipeline name JSON-encoded', () => {
+    const f = buildSubmitFile({ pipeline: 'a"b', inputNames: [], cpus: 1, memoryMB: 512 });
+    // The raw quote must not appear unescaped inside the printf format.
+    expect(f).not.toContain('"pipeline":"a"b"');
   });
 });

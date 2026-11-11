@@ -9,7 +9,7 @@
 // obvious and getting it wrong looks like a job that hangs.
 
 import { useCallback, useEffect, useState } from 'react';
-import { api, ApiError, jobStatusLabel, type Job } from './lib/api';
+import { api, ApiError, HoldReasonCode, jobStatusLabel, type Job } from './lib/api';
 import { buildSubmitFile } from './lib/submit';
 import { app, type Identity } from './lib/htcondor';
 import { Dropzone } from './components/Dropzone';
@@ -189,7 +189,7 @@ export function App() {
                     Stop
                   </button>
                 )}
-                {j.JobStatus === 5 && (
+                {j.JobStatus === 5 && j.HoldReasonCode !== HoldReasonCode.SpoolingInput && (
                   <button
                     type="button"
                     className="secondary"

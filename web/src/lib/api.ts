@@ -77,6 +77,9 @@ export const JOB_ATTRS = [
   'QDate',
   'ExitCode',
   'HoldReason',
+  // Needed to tell 'spooling your input' (16) apart from a real
+  // problem. Without it every just-submitted job reads as failed.
+  'HoldReasonCode',
 ] as const satisfies readonly string[];
 
 /** A job as the API returns it: a ClassAd, so the fields are loose. */
@@ -89,6 +92,7 @@ export interface Job {
   JobBatchName?: string;
   QDate?: number;
   HoldReason?: string;
+  HoldReasonCode?: number;
   ExitCode?: number;
   [attr: string]: unknown;
 }
@@ -127,10 +131,18 @@ export const api = {
   /**
    * Upload input files for a job that has already been submitted.
    *
-   * Submit first, upload second: the job sits in a "transferring input"
-   * state until this completes, which is why a freshly submitted job
-   * can look stuck for a moment. Submit with `hold = true` if the job
-   * must not start before its inputs land.
+   * Submit first, upload second. The server submits with input
+   * spooling on, so the job is HELD -- HoldReasonCode 16,
+   * SpoolingInput -- from the moment it is created until this upload
+   * lands. That is normal and is not a failure; see jobStatusLabel,
+   * which must say so in words or the user reads their brand-new job
+   * as broken.
+   *
+   * There is no `hold` option on submit. JobSubmitRequest has exactly
+   * one field, `submit_file`. (An earlier version of this comment
+   * described a `hold = true` parameter that does not exist -- the
+   * precise mistake AGENTS.md warns about, shipped in the client it
+   * tells you to extend.)
    */
   uploadInputs: async (jobId: string, files: InputFile[]): Promise<void> => {
     const form = new FormData();
@@ -207,6 +219,19 @@ export const api = {
     ).then((r) => r.templates ?? []),
 };
 
+/**
+ * The hold codes worth telling apart.
+ *
+ * SpoolingInput is not a failure: the server submits with spooling
+ * on, so every job is held under this code between submit and the
+ * input upload. UploadFileError is what you get when a declared
+ * output file was missing at the end -- see AGENTS.md.
+ */
+export const HoldReasonCode = {
+  UploadFileError: 13,
+  SpoolingInput: 16,
+} as const;
+
 /** JobStatus codes, which the API returns as bare integers. */
 export const JobStatus = {
   Idle: 1,
@@ -235,6 +260,13 @@ export function jobStatusLabel(job: Job): string {
     case JobStatus.Completed:
       return job.ExitCode === 0 ? 'Finished' : `Failed (exit ${job.ExitCode})`;
     case JobStatus.Held:
+      // Code 16 is SpoolingInput: the job is held because the server
+      // is waiting for the input upload that always follows submit.
+      // It is the state EVERY job passes through, and calling it
+      // "Stopped" tells the user their new job failed.
+      if (job.HoldReasonCode === HoldReasonCode.SpoolingInput) {
+        return 'Uploading your files';
+      }
       return job.HoldReason ? `Stopped: ${job.HoldReason}` : 'Stopped';
     case JobStatus.Transferring:
       return 'Copying results back';
