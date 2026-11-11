@@ -7,7 +7,17 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "noEmit": true,
-    "types": ["node"]
+    "typeRoots": [
+      "../web/node_modules/@types"
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "*": [
+        "../web/node_modules/*"
+      ]
+    }
   },
-  "include": ["."]
+  "include": [
+    "."
+  ]
 }

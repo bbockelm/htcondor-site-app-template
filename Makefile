@@ -15,7 +15,7 @@ DEMO_CREDS ?= /tmp/htcondor-demo-credentials.json
 NPM := npm --prefix web
 
 .DEFAULT_GOAL := help
-.PHONY: help install dev build bundle test e2e lint fmt check clean
+.PHONY: help install dev build bundle test e2e lint fmt check clean openapi
 
 help: ## List targets
 	@grep -hE '^[a-z][a-zA-Z0-9_-]*:.*?## ' $(MAKEFILE_LIST) \
@@ -69,6 +69,16 @@ bundle: build ## Package dist/$(APP).zip and dist/$(APP).zip.sha256
 
 e2e: install bundle ## Playwright against a demo API server in Docker
 	./scripts/e2e.sh
+
+# The committed openapi.json is what AGENTS.md tells you to consult
+# instead of guessing at endpoints. It is a copy, so it can rot; this
+# refreshes it from a running server and fails if the result is not
+# valid JSON.
+openapi: ## Refresh openapi.json from a running server (API=https://...)
+	@curl -ksSf "$(API)/openapi.json" -o openapi.json.new
+	@python3 -c "import json,sys; json.load(open('openapi.json.new'))" 		|| { echo "not valid JSON; leaving openapi.json alone"; rm -f openapi.json.new; exit 1; }
+	@mv openapi.json.new openapi.json
+	@echo "openapi.json refreshed from $(API)"
 
 clean: ## Remove build output
 	rm -rf web/dist dist test-results playwright-report

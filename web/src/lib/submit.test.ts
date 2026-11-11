@@ -82,3 +82,53 @@ describe('buildSubmitFile', () => {
     expect(buildSubmitFile(base).trim().endsWith('queue 1')).toBe(true);
   });
 });
+
+// commandNames returns the submit commands present, in order.
+function commandNames(submitFile: string): string[] {
+  const names: string[] = [];
+  for (const raw of submitFile.split('\n')) {
+    const line = raw.trim();
+    if (/^queue\b/i.test(line)) break;
+    const m = line.match(/^([A-Za-z_+][A-Za-z0-9_]*)\s*=/);
+    if (m) names.push(m[1].toLowerCase());
+  }
+  return names;
+}
+
+describe('output files', () => {
+  const base = { pipeline: 'align', inputNames: ['a.txt'], cpus: 1, memoryMB: 512 };
+
+  it('declares its structured output so it comes back', () => {
+    expect(commandNames(buildSubmitFile(base))).toContain('transfer_output_files');
+    expect(commandValue(buildSubmitFile(base), 'transfer_output_files')).toContain('results.json');
+  });
+
+  // HTCondor holds a job whose declared output file is missing at the
+  // end. A job that writes results.json only on success is therefore
+  // held on every failure, for "missing output" -- which says nothing
+  // about what went wrong and leaves the user staring at a state
+  // nobody can explain. Creating it first makes a failure report
+  // itself.
+  it('creates every declared output file before any work can fail', () => {
+    const f = buildSubmitFile(base);
+    const declared = (commandValue(f, 'transfer_output_files') ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    expect(declared.length).toBeGreaterThan(0);
+
+    const args = commandValue(f, 'arguments') ?? '';
+    for (const out of declared) {
+      const createdAt = args.indexOf(`: > ${out}`);
+      expect(createdAt, `${out} is declared but never created up front`).toBeGreaterThanOrEqual(0);
+      // ...and created BEFORE it is written, not after.
+      const writtenAt = args.indexOf(`> ${out}`, createdAt + 1);
+      if (writtenAt >= 0) expect(createdAt).toBeLessThan(writtenAt);
+    }
+  });
+
+  it('emits JSON the page can render, not only prose', () => {
+    expect(buildSubmitFile(base)).toContain('results.json');
+    expect(commandValue(buildSubmitFile(base), 'arguments')).toContain('printf');
+  });
+});

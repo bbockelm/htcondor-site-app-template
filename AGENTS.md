@@ -8,11 +8,19 @@ Read this before writing code. Most of what follows is not guessable from the so
 
 The app talks to the HTCondor HTTP API at `/api/v1/*` on its own origin.
 
-**Do not invent endpoints.** The API is larger than `web/src/lib/api.ts` and not larger in the way you are about to assume. Check `/openapi.json` on a running server — `make e2e` leaves one up with `KEEP_CONTAINER=1`, or run one yourself — before adding a call. A plausible-looking REST route that does not exist is the single most common failure in this codebase.
+**Do not invent endpoints.** The API is larger than `web/src/lib/api.ts` and not larger in the way you are about to assume. Check `openapi.json` in this repository before adding a call — it is a copy of the spec the server serves at `/openapi.json`, committed here so you can read it without a running server. A plausible-looking REST route that does not exist is the single most common failure in this codebase.
+
+**Some documented routes are not implemented.** Read each description, not just the path: `DELETE /jobs/{id}` and `PATCH /jobs/{id}` are both in the spec and both answer `501`, and the words "NOT YET IMPLEMENTED" are the only warning. To stop a job, hold it (`POST /jobs/{id}/hold`); call it "stop", not "cancel", because a held job is still in the queue and can be released.
 
 The endpoints this app uses are wrapped in `web/src/lib/api.ts`. Add to that file rather than calling `fetch` from a component.
 
 **Authentication is already done.** The app is served same-origin, so the browser holds the session cookie the user got when they logged in. Every request sends `credentials: 'include'` and that is the whole story. There is no token to store, no refresh, no Authorization header, no login form to build. A 401 means the session expired; `api.ts` redirects to `/login` for you.
+
+**Ask for every job attribute you read.** `GET /jobs` has a default projection — `ClusterId, ProcId, Owner, JobStatus, Cmd, Args` — and returns nothing else. A field you did not request arrives `undefined`, and that does not fail loudly, it *renders*: a finished job whose `ExitCode` was never asked for displays as "Failed (exit undefined)". `JOB_ATTRS` in `api.ts` is the list; add to it before you read a new attribute anywhere. `limit` likewise defaults to 50 and truncates in silence.
+
+**Have the job write JSON, not just prose.** A page handed `{"rows": [...]}` can draw a table, sort it, show the top ten. A page handed a block of text can only put it in a `<pre>` and hope. The job is the only thing that knows the shape of its own results, so emit them structured there — one `printf` — and keep the human-readable text as well.
+
+**Create every declared output file at the START of the job.** HTCondor *holds* a job whose declared output file is missing when it finishes. So a job that writes `results.json` only on success is held on every failure — and held for "missing output", which says nothing about what actually went wrong, leaving the user with a job stuck in a state nobody can explain. `: > results.json` before any real work costs nothing and lets failures report themselves. `buildSubmitFile` does this, and a test fails if it stops.
 
 **Submit, then upload.** `POST /api/v1/jobs` creates the job; `POST /api/v1/jobs/{id}/input/multipart` sends its input files afterwards. Between the two the job sits in a transferring-input state that users read as "stuck". Do not reorder these, and do surface that state as something other than silence.
 

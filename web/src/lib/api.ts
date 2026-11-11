@@ -59,6 +59,26 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await res.json()) as T;
 }
 
+/**
+ * The attributes this app reads off a job.
+ *
+ * This list is the contract with the server: anything not named here
+ * comes back undefined, whatever the job actually holds. Keep it in
+ * step with what the components read -- a field added to the UI but
+ * not to this list fails quietly and looks like a backend bug.
+ */
+export const JOB_ATTRS = [
+  'ClusterId',
+  'ProcId',
+  'JobStatus',
+  'Owner',
+  'Cmd',
+  'JobBatchName',
+  'QDate',
+  'ExitCode',
+  'HoldReason',
+] as const satisfies readonly string[];
+
 /** A job as the API returns it: a ClassAd, so the fields are loose. */
 export interface Job {
   ClusterId: number;
@@ -123,16 +143,46 @@ export const api = {
     });
   },
 
-  /** The caller's jobs. `constraint` is a ClassAd expression. */
-  jobs: (constraint?: string) => {
-    const q = constraint ? `?constraint=${encodeURIComponent(constraint)}` : '';
-    return request<{ jobs: Job[] }>(`/jobs${q}`).then((r) => r.jobs ?? []);
+  /**
+   * The caller's jobs. `constraint` is a ClassAd expression.
+   *
+   * ALWAYS sends an explicit projection. `GET /jobs` has a default
+   * one -- ClusterId, ProcId, Owner, JobStatus, Cmd, Args -- and
+   * returns nothing else, so a field you did not ask for arrives
+   * `undefined` rather than missing. That is not a loud failure: it
+   * renders. A finished job whose ExitCode was never requested reads
+   * "Failed (exit undefined)", which is the opposite of the truth.
+   *
+   * Add an attribute here before you read it anywhere else.
+   *
+   * `limit` also has a default (50) and truncates silently.
+   */
+  jobs: (constraint?: string, attrs: readonly string[] = JOB_ATTRS, limit = 200) => {
+    const q = new URLSearchParams({ projection: attrs.join(','), limit: String(limit) });
+    if (constraint) q.set('constraint', constraint);
+    return request<{ jobs: Job[] }>(`/jobs?${q}`).then((r) => r.jobs ?? []);
   },
 
   job: (jobId: string) => request<Job>(`/jobs/${encodeURIComponent(jobId)}`),
 
-  remove: (jobId: string) =>
-    request<void>(`/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' }),
+  /**
+   * Stop a running or queued job by holding it.
+   *
+   * NOT `DELETE /jobs/{id}`: that route exists in the API but is
+   * documented "NOT YET IMPLEMENTED" and answers 501. A button wired
+   * to it cannot work, however reasonable it looks.
+   *
+   * Holding is not removing, so say "stop", not "cancel" -- a held
+   * job is still in the queue and can be released. Calling it
+   * "cancelled" in the interface would be the kind of lie AGENTS.md
+   * tells you not to tell.
+   */
+  hold: (jobId: string) =>
+    request<void>(`/jobs/${encodeURIComponent(jobId)}/hold`, { method: 'POST' }),
+
+  /** Release a held job so it can run again. */
+  release: (jobId: string) =>
+    request<void>(`/jobs/${encodeURIComponent(jobId)}/release`, { method: 'POST' }),
 
   /** URL for the job's output sandbox as a tar. Use as an href. */
   outputUrl: (jobId: string) => `${BASE}/jobs/${encodeURIComponent(jobId)}/output`,

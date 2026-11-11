@@ -177,12 +177,25 @@ export function App() {
                   <a href={api.outputUrl(id)}>Download results</a>
                 )}
                 {(j.JobStatus === 1 || j.JobStatus === 2) && (
+                  // "Stop", not "Cancel": this holds the job, which
+                  // leaves it in the queue where it can be released.
+                  // DELETE /jobs/{id} answers 501, so a Cancel button
+                  // would be a control that cannot work.
                   <button
                     type="button"
                     className="secondary"
-                    onClick={() => void api.remove(id).then(refresh)}
+                    onClick={() => void api.hold(id).then(refresh)}
                   >
-                    Cancel
+                    Stop
+                  </button>
+                )}
+                {j.JobStatus === 5 && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => void api.release(id).then(refresh)}
+                  >
+                    Try again
                   </button>
                 )}
               </li>
