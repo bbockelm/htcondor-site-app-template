@@ -57,6 +57,21 @@ The server notices the new file and reloads it. There is no restart.
 
 `make bundle` is reproducible — the same source produces the same bytes and the same digest — so an operator can rebuild from your tagged commit and confirm that what is deployed is what you shipped.
 
+## Worked examples
+
+Two complete apps, each on its own branch. They are not extra folders to wade through: `main` stays the one thing "Use this template" gives you, and each example is a branch you can **diff against it** to see exactly what building an app involves.
+
+| Branch | What it does | Worth reading for |
+| --- | --- | --- |
+| [`example/word-frequency`](../../tree/example/word-frequency) | Counts word frequencies in dropped text files, one job per file | A sortable results table drawn from the job's `results.json`, and an awk program generated in the browser so no user text ever reaches the submit file |
+| [`example/blast`](../../tree/example/blast) | Searches many query files against one uploaded reference database | What to do when a large input is shared by many jobs — including telling the user what their submission will cost before they press the button |
+
+```bash
+git diff main..example/blast -- web/src
+```
+
+Both were written from this repository alone, by someone with no other context, which is also how most of its sharper edges were found. Each is pinned to the template as it stood when it was written, so expect small drift from `main`.
+
 ## What not to do
 
 The short version of `AGENTS.md`, which you should read before writing code:
