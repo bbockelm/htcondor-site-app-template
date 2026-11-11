@@ -171,8 +171,10 @@ export const api = {
    *
    * Submit first, upload second: the job sits in a "transferring input"
    * state until this completes, which is why a freshly submitted job
-   * can look stuck for a moment. Submit with `hold = true` if the job
-   * must not start before its inputs land.
+   * There is no `hold` option on submit: JobSubmitRequest has exactly
+   * one field, `submit_file`. (This example was written against an
+   * older template whose comment here described a `hold = true`
+   * parameter that does not exist.)
    */
   uploadInputs: async (jobId: string, files: InputFile[]): Promise<void> => {
     const form = new FormData();
