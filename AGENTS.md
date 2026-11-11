@@ -4,6 +4,15 @@ This is a **site app** for an HTCondor access point: a static web app served by 
 
 Read this before writing code. Most of what follows is not guessable from the source.
 
+**How to use this file.** The rules below are mostly scar tissue — each one is a mistake somebody already made, with the reason it was not obvious. When you hit a problem this file does not name, the shape of an answer is usually one of:
+
+- *Can the server tell me, instead of me guessing?* `openapi.json` is committed at the repo root; `GET /api/v1/auth/me` reports who the user is and what they can see.
+- *Can I move the cost somewhere cheaper?* The shared-input section below is the worked example: the same data, uploaded once by a DAG instead of once per job.
+- *Can I make the failure explain itself?* Creating output files up front, naming a hold in words, showing the server's own error text — all of these turn "it broke" into something the user can act on.
+- *Has somebody already solved this here?* Two complete apps live on the `example/word-frequency` and `example/blast` branches. `git diff main..example/blast -- web/src` is often faster than reasoning from first principles — the BLAST one in particular works through a large shared input end to end.
+
+If you solve something this file does not cover, add it here. The next person is in your position with less time.
+
 ## The API
 
 The app talks to the HTCondor HTTP API at `/api/v1/*` on its own origin.
@@ -39,6 +48,12 @@ What follows from that:
 - **Make the job count a budget, not just a parallelism choice.** `jobs × databaseSize` is what the user uploads. Cap the fan-out by the size of the shared input, and refuse sizes that would be absurd.
 - **Tell the user the number before they commit to it.** "Your database (480 MB) is sent once per job, so this uploads 1.9 GB" is the cost of the design, and they are the one paying it.
 - **`queue N` does not rescue you.** The submit file is one text shared by every proc, but uploads are per `cluster.proc`, so one `transfer_input_files` line cannot name a different per-task input for each proc. A fan-out app submits one cluster per task group. Reach for `queue N` only when every proc genuinely wants the same inputs.
+- **A DAG uploads the shared input once.** This is the trick worth knowing. A DAG is submitted as a single job whose spooled sandbox holds everything the workflow needs — the `.dag` file, the per-node submit files, and the shared input. That sandbox goes up **once**. DAGMan then runs on the access point, in that directory, and submits the node jobs itself; each node names the shared file by its basename and it is already there. The user's uplink carries it one time instead of N, and the access point keeps one copy rather than N. The access point still sends it on to each execute node, but that leg is inside the facility and not the one the user waits on.
+
+  Two constraints that shape the design: the spool is **one flat directory**, so every file is referenced by basename and two inputs cannot share a name; and **nothing can be added after submission**, so everything the workflow will ever need goes up in that one upload.
+
+  The catch today: **there is no REST route for submitting a DAG.** `submit_dag` exists as an MCP tool, and `GET /jobs/{id}/dag` reads a submitted workflow's structure back, but a site app cannot submit one. If your app needs this shape, say so — it is the strongest argument for adding the endpoint.
+
 - **A URL in `transfer_input_files` would fix this** — the execute node fetches it, once per node rather than once per job, and a site cache can dedupe it entirely. The submit file is passed through verbatim, so you *can* emit one. But nothing here tells you whether this pool's execute nodes have a working transfer plugin for your scheme, and there is no API that reports it. A control that either works or holds every job with a transfer error, with no way to check first, is worse than the upload. **Ask your access point's operator**, and only then.
 
 **Submit, then upload — and the job is HELD until you do.** The server submits with input spooling on, so between `POST /jobs` and the upload every job sits held under `HoldReasonCode 16` (`SpoolingInput`). That is normal. If your interface renders Held as "stopped" or "failed", it says so about every job the moment the user submits it, which is the first thing they will ever see. `jobStatusLabel` names this case, and `HoldReasonCode` is in `JOB_ATTRS` so it can. `POST /api/v1/jobs` creates the job; `POST /api/v1/jobs/{id}/input/multipart` sends its input files afterwards. Between the two the job sits in a transferring-input state that users read as "stuck". Do not reorder these, and do surface that state as something other than silence.
