@@ -93,3 +93,35 @@ ul.files li span.name, ul.jobs li span.name { flex: 1; overflow-wrap: anywhere; 
 .notice { padding: .75rem 1rem; border-radius: var(--radius); border: 1px solid var(--line); margin-bottom: 1rem; }
 .notice.error { border-color: var(--err); color: var(--err); }
 .notice.success { border-color: var(--ok); color: var(--ok); }
+
+/* ---- BLAST app ---------------------------------------------------- */
+
+p.hint { margin: 0 0 .75rem; }
+
+/* The cost of the submission, said before the button rather than
+   discovered after it. */
+.plan {
+  border: 1px solid var(--line); border-left: 3px solid var(--accent);
+  border-radius: var(--radius); padding: .75rem 1rem; margin: 0 0 1rem;
+  font-size: .95rem;
+}
+
+.problem { display: block; font-size: .8rem; margin-top: .15rem; }
+
+ul.searches { list-style: none; padding: 0; margin: 0; }
+li.search {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: .75rem 1rem; margin-bottom: 1rem;
+}
+.search-head { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+.search-head .name { flex: 1; font-weight: 600; overflow-wrap: anywhere; }
+li.search ul.jobs li:last-child { border-bottom: none; }
+
+.results { margin-top: .75rem; }
+table.hits { width: 100%; border-collapse: collapse; font-size: .85rem; }
+table.hits th, table.hits td {
+  text-align: left; padding: .35rem .5rem; border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+table.hits th { color: var(--muted); font-weight: 600; }
+.results .notice { font-size: .9rem; }

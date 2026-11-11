@@ -5,8 +5,22 @@ import { loginAs, passwordFor, type DemoCredentials } from './fixtures/login';
 const creds: DemoCredentials = JSON.parse(
   readFileSync(process.env.DEMO_CREDENTIALS_FILE!, 'utf8'),
 );
-const APP_ID = process.env.APP_ID ?? 'htcondor-site-app-template';
+const APP_ID = process.env.APP_ID ?? 'blast-app';
 const APP_URL = `/site/${APP_ID}/`;
+
+const DATABASE = {
+  name: 'reference.fasta',
+  mimeType: 'text/plain',
+  buffer: Buffer.from('>ref1\nACGTACGTACGTACGTACGTACGT\n>ref2\nTTTTGGGGCCCCAAAA\n'),
+};
+
+function query(n: number) {
+  return {
+    name: `query${n}.fasta`,
+    mimeType: 'text/plain',
+    buffer: Buffer.from(`>q${n}\nACGTACGTACGT\n`),
+  };
+}
 
 test.beforeEach(async ({ page }) => {
   await loginAs(page, 'admin', passwordFor(creds, 'admin'));
@@ -26,28 +40,58 @@ test('the app is served under its own id and knows where it is', async ({ page }
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
 });
 
-test('submitting reaches the real queue', async ({ page }) => {
+test('the cost of the submission is stated before the button is enabled', async ({ page }) => {
   await page.goto(APP_URL);
 
-  // Attach a file through the hidden input; drag-and-drop is the same
-  // code path below it.
-  await page.getByTestId('file-input').setInputFiles({
-    name: 'sample.txt',
-    mimeType: 'text/plain',
-    buffer: Buffer.from('hello from the e2e suite\n'),
-  });
-  await expect(page.getByTestId('file-list')).toContainText('sample.txt');
+  // Nothing chosen yet: the button must not be usable and the page must
+  // say what is missing rather than nothing at all.
+  await expect(page.getByTestId('submit')).toBeDisabled();
+  await expect(page.getByTestId('plan')).toContainText('reference database');
 
+  await page.getByTestId('database-input').setInputFiles(DATABASE);
+  await page.getByTestId('query-input').setInputFiles([query(1), query(2), query(3)]);
+
+  // The database is uploaded once per job -- the one number that
+  // decides whether a submission is reasonable. If this sentence ever
+  // stops appearing, the app has started hiding its own cost.
+  const plan = page.getByTestId('plan');
+  await expect(plan).toContainText('3 files in 3 jobs');
+  await expect(plan).toContainText('sent once per job');
+  await expect(page.getByTestId('submit')).toBeEnabled();
+});
+
+test('a file the submit file could not carry is refused by name', async ({ page }) => {
+  await page.goto(APP_URL);
+  await page.getByTestId('database-input').setInputFiles(DATABASE);
+  await page.getByTestId('query-input').setInputFiles({
+    name: 'my sequences,v2.fasta',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('>q\nACGT\n'),
+  });
+
+  // A comma would end the transfer_input_files entry and a space would
+  // split the shell word. The app says which file and what to do,
+  // rather than silently dropping it.
+  await expect(page.getByTestId('plan')).toContainText('Rename');
+  await expect(page.getByTestId('submit')).toBeDisabled();
+});
+
+test('submitting reaches the real queue, one job per group of queries', async ({ page }) => {
+  await page.goto(APP_URL);
+  await page.getByTestId('database-input').setInputFiles(DATABASE);
+  await page.getByTestId('query-input').setInputFiles([query(1), query(2)]);
   await page.getByTestId('submit').click();
 
-  // The success notice carries the real cluster.proc the schedd
-  // assigned, so asserting on it proves the submit reached the queue
-  // rather than that a button changed state.
-  const notice = page.getByTestId('submitted');
-  await expect(notice).toBeVisible();
-  await expect(notice).toContainText(/Submitted job \d+\.\d+/);
+  await expect(page.getByTestId('submitted')).toContainText('2 jobs are on their way');
 
-  await expect(page.getByTestId('job-list')).toBeVisible();
+  // Real cluster.proc ids from the schedd, not a button that changed
+  // state. And "Receiving its files", never "Stopped": every job this
+  // app submits is HELD with HoldReasonCode 16 between POST /jobs and
+  // the input upload, and calling that stopped would be a lie.
+  const list = page.getByTestId('search-list');
+  await expect(list).toBeVisible();
+  await expect(list).toContainText(/Job \d+\.\d+/);
+  await expect(list).not.toContainText('Stopped:');
 });
 
 test('an API failure is reported in words, not swallowed', async ({ page }) => {
@@ -62,6 +106,8 @@ test('an API failure is reported in words, not swallowed', async ({ page }) => {
   );
 
   await page.goto(APP_URL);
+  await page.getByTestId('database-input').setInputFiles(DATABASE);
+  await page.getByTestId('query-input').setInputFiles([query(1)]);
   await page.getByTestId('submit').click();
 
   // The server's own message, not a generic "something went wrong":

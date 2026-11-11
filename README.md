@@ -1,3 +1,42 @@
+# BLAST sequence search
+
+A job submission interface for BLAST searches, served by our HTCondor access point to the lab.
+
+Upload one reference database and as many query files as you like. Each query file is searched
+against the database; the search is split across several jobs; the page shows the matches and
+links to the full table.
+
+## The database is uploaded once per job
+
+This is the one thing to understand before changing anything.
+
+The access point's API has exactly two ways to get a file to a job: `POST /jobs`, which takes a
+submit file, and `POST /jobs/{jobId}/input/multipart`, which uploads into **one** job's sandbox.
+There is no shared stage — no place to put a file once and have many jobs name it. So the
+database crosses the wire once per job, and the number of jobs is a **budget** decision, not a
+parallelism one:
+
+    jobs = min(number of query files, 40, 4 GiB / database size)
+
+A 20 MB database runs as many jobs; a 1 GB database runs as four, each working through its share
+of the queries in sequence. A database over 2 GB is refused with an explanation, because a browser
+upload that size fails after an hour of waiting.
+
+The page states the total upload before the button is enabled. That number is the cost of the
+design and the user should see it.
+
+The fix that is not here: HTCondor can fetch an input from a URL, which would make the database
+travel once per execute node instead of once per job. Nothing in the API says whether this pool's
+execute nodes can do that, so this app does not bet a biologist's afternoon on it. See the header
+of `web/src/lib/submit.ts`.
+
+## What is where
+
+`web/src/lib/submit.ts` is the science: the plan, the runner script the job executes, and the
+submit file. `web/src/app.tsx` is the interface. Everything else is the template below.
+
+---
+
 # HTCondor site app template
 
 A starting point for a custom job submission interface served by an HTCondor access point, to your group, at your site.

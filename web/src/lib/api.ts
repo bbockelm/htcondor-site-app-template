@@ -77,6 +77,12 @@ export const JOB_ATTRS = [
   'QDate',
   'ExitCode',
   'HoldReason',
+  // HoldReasonCode distinguishes the hold EVERY job of this app passes
+  // through -- 16, SpoolingInput, which is where a job waits between
+  // POST /jobs and the input upload -- from a hold that means something
+  // is wrong. Without it a freshly submitted job reads "Stopped", which
+  // is both alarming and false.
+  'HoldReasonCode',
 ] as const satisfies readonly string[];
 
 /** A job as the API returns it: a ClassAd, so the fields are loose. */
@@ -89,6 +95,7 @@ export interface Job {
   JobBatchName?: string;
   QDate?: number;
   HoldReason?: string;
+  HoldReasonCode?: number;
   ExitCode?: number;
   [attr: string]: unknown;
 }
@@ -195,6 +202,36 @@ export const api = {
   outputUrl: (jobId: string) => `${BASE}/jobs/${encodeURIComponent(jobId)}/output`,
 
   /**
+   * URL for ONE file out of a finished job's sandbox. Use as an href so
+   * the browser downloads it without the page holding it in memory --
+   * hits.tsv can be tens of megabytes.
+   */
+  fileUrl: (jobId: string, filename: string) =>
+    `${BASE}/jobs/${encodeURIComponent(jobId)}/files/${encodeURIComponent(filename)}`,
+
+  /**
+   * One file out of a finished job's sandbox, as text.
+   *
+   * The server sets the Content-Type from the file's own bytes
+   * (http.DetectContentType), so an empty results.json does not
+   * necessarily arrive as JSON. Read it as text and parse here; a job
+   * that failed before writing anything leaves the pre-created empty
+   * file, and that is a normal outcome, not an error to throw on.
+   */
+  jobFileText: async (jobId: string, filename: string): Promise<string> => {
+    const res = await fetch(
+      `${BASE}/jobs/${encodeURIComponent(jobId)}/files/${encodeURIComponent(filename)}`,
+      { credentials: 'include' },
+    );
+    if (res.status === 401) {
+      redirectToLogin();
+      throw new ApiError(401, 'Session expired');
+    }
+    if (!res.ok) throw new ApiError(res.status, `${filename} is not in this job's results yet`);
+    return res.text();
+  },
+
+  /**
    * Site submit templates, if this access point defines any. A template
    * is a submit-file body plus the column names it expects.
    *
@@ -218,27 +255,72 @@ export const JobStatus = {
 } as const;
 
 /**
+ * HoldReasonCodes this app can say something useful about.
+ *
+ * Every job this app submits passes through 16 on its way into the
+ * queue: POST /jobs spools, which leaves the job HELD until the input
+ * upload finishes. Treating that as "stopped" would mean every
+ * submission looks broken for as long as the database takes to upload,
+ * which for this app is the longest part of the whole business.
+ */
+export const HoldReasonCode = {
+  SpoolingInput: 16,
+  DownloadFileError: 12,
+  UploadFileError: 13,
+} as const;
+
+/**
  * A label for a job's state, in words the user can act on.
  *
- * Status 1 with no start time usually means the input upload has not
- * finished, which users read as "stuck" unless told otherwise. Being
- * specific here costs one line and saves a support email.
+ * No code, no ClassAd, no exit status on its own: a biologist cannot do
+ * anything with "HoldReasonCode 13", and the one thing it reliably means
+ * -- a file transfer failed -- is worth saying instead.
  */
 export function jobStatusLabel(job: Job): string {
   switch (job.JobStatus) {
     case JobStatus.Idle:
       return job.QDate && Date.now() / 1000 - job.QDate < 30 ? 'Starting' : 'Waiting for a slot';
     case JobStatus.Running:
-      return 'Running';
+      return 'Searching';
     case JobStatus.Removed:
       return 'Cancelled';
     case JobStatus.Completed:
-      return job.ExitCode === 0 ? 'Finished' : `Failed (exit ${job.ExitCode})`;
+      return job.ExitCode === 0 ? 'Finished' : 'Finished with problems';
     case JobStatus.Held:
-      return job.HoldReason ? `Stopped: ${job.HoldReason}` : 'Stopped';
+      return heldLabel(job);
     case JobStatus.Transferring:
       return 'Copying results back';
     default:
       return 'Unknown';
   }
+}
+
+function heldLabel(job: Job): string {
+  switch (job.HoldReasonCode) {
+    case HoldReasonCode.SpoolingInput:
+      // Not an error. This is where a job waits for its database.
+      return 'Receiving its files';
+    case HoldReasonCode.DownloadFileError:
+      return 'The database could not be copied to the compute node';
+    case HoldReasonCode.UploadFileError:
+      return 'The results could not be copied back';
+    default:
+      return job.HoldReason ? `Stopped: ${job.HoldReason}` : 'Stopped';
+  }
+}
+
+/**
+ * True while a job is still waiting for the files the app is uploading.
+ *
+ * Used to keep the "stop" control away from a job that is mid-upload:
+ * holding an already-held job does nothing the user can see, and
+ * releasing it before its files land starts a job that cannot work.
+ */
+export function isReceivingFiles(job: Job): boolean {
+  return job.JobStatus === JobStatus.Held && job.HoldReasonCode === HoldReasonCode.SpoolingInput;
+}
+
+/** Jobs that will never do any more work, whatever the outcome. */
+export function isFinished(job: Job): boolean {
+  return job.JobStatus === JobStatus.Completed || job.JobStatus === JobStatus.Removed;
 }
