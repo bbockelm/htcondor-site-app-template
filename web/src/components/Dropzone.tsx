@@ -4,6 +4,10 @@ interface Props {
   files: File[];
   onChange: (files: File[]) => void;
   disabled?: boolean;
+  /** What the file picker should offer, e.g. '.txt,text/plain'. */
+  accept?: string;
+  /** The words in the drop target. Say what kind of file is wanted. */
+  hint?: string;
 }
 
 /**
@@ -13,7 +17,7 @@ interface Props {
  * cannot be reached from the keyboard is unusable for some people and
  * merely annoying on a laptop trackpad for everyone else.
  */
-export function Dropzone({ files, onChange, disabled }: Props) {
+export function Dropzone({ files, onChange, disabled, accept, hint }: Props) {
   const [over, setOver] = useState(false);
   const input = useRef<HTMLInputElement>(null);
 
@@ -55,13 +59,14 @@ export function Dropzone({ files, onChange, disabled }: Props) {
           ref={input}
           type="file"
           multiple
+          accept={accept}
           data-testid="file-input"
           onChange={(e) => {
             add(e.target.files);
             e.target.value = '';
           }}
         />
-        Drop input files here, or choose files
+        {hint ?? 'Drop input files here, or choose files'}
       </div>
 
       {files.length > 0 && (

@@ -93,3 +93,57 @@ ul.files li span.name, ul.jobs li span.name { flex: 1; overflow-wrap: anywhere; 
 .notice { padding: .75rem 1rem; border-radius: var(--radius); border: 1px solid var(--line); margin-bottom: 1rem; }
 .notice.error { border-color: var(--err); color: var(--err); }
 .notice.success { border-color: var(--ok); color: var(--ok); }
+
+/* A job row is a header line plus an optional report underneath it, so
+   the flex row lives in .row rather than on the <li> itself. */
+ul.jobs li { display: block; }
+ul.jobs li .row { display: flex; align-items: center; gap: .75rem; }
+ul.jobs li a { color: var(--accent); font-size: .85rem; }
+
+label.check { display: flex; align-items: flex-start; gap: .5rem; }
+label.check input { margin-top: .3rem; }
+label.check span { display: inline; color: var(--fg); font-size: 1rem; margin: 0; }
+
+/* The report is fixed-pitch because it is a column-aligned table that
+   the job formatted; a proportional font would misalign it. */
+pre.report {
+  margin: .75rem 0 .25rem;
+  padding: .75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  font-size: .8rem;
+  line-height: 1.45;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+fieldset p.notice { margin: .75rem 0 0; }
+fieldset p.meta { margin: .25rem 0 0; }
+
+/* The counts table. Numbers right-aligned and fixed-pitch so columns
+   line up and digits do not jitter between rows. */
+table.counts { width: 100%; border-collapse: collapse; margin: .5rem 0; font-size: .9rem; }
+table.counts th, table.counts td { padding: .3rem .5rem; border-bottom: 1px solid var(--line); text-align: left; }
+table.counts th { font-weight: 600; font-size: .8rem; color: var(--muted); }
+table.counts .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.counts .rank { width: 2.5rem; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+table.counts .word { overflow-wrap: anywhere; }
+
+button.sort {
+  background: none; border: none; padding: 0; font: inherit;
+  color: var(--muted); cursor: pointer; font-weight: 600;
+}
+button.sort:hover { color: var(--accent); }
+th.num button.sort { float: right; }
+
+/* The share bar sits behind its number rather than in its own column:
+   a fifth column of pure decoration would crowd the words out. */
+table.counts .bar {
+  display: inline-block; height: .55em; margin-right: .4rem; vertical-align: baseline;
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 2px; max-width: 5rem;
+}
+
+.results { margin: .5rem 0 .75rem; }
+.results > button.secondary { margin-top: .25rem; }

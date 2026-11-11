@@ -3,6 +3,6 @@
 #
 # There is deliberately no `groups` key here and no `id`. Groups are the
 # operator's to set; the id comes from the bundle's file name.
-name: Example Pipeline
-description: Drop input files, pick a pipeline, submit.
-icon: beaker
+name: Word Frequency
+description: Drop in text files and count how often each word appears in each one.
+icon: chart

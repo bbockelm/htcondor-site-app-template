@@ -60,12 +60,43 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 /**
+ * The same thing for an endpoint that answers text/plain.
+ *
+ * `request` assumes JSON, and a few endpoints -- stdout and stderr
+ * among them -- do not answer JSON. Calling res.json() on those throws
+ * a parse error that reads like a server fault.
+ */
+async function requestText(path: string): Promise<string> {
+  const res = await fetch(`${BASE}${path}`, { credentials: 'include' });
+  if (res.status === 401) {
+    redirectToLogin();
+    throw new ApiError(401, 'Session expired');
+  }
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const body = (await res.json()) as { message?: string; error?: string };
+      detail = body.message ?? body.error ?? detail;
+    } catch {
+      /* not JSON; statusText is the best we have */
+    }
+    throw new ApiError(res.status, detail);
+  }
+  return res.text();
+}
+
+/**
  * The attributes this app reads off a job.
  *
  * This list is the contract with the server: anything not named here
  * comes back undefined, whatever the job actually holds. Keep it in
  * step with what the components read -- a field added to the UI but
  * not to this list fails quietly and looks like a backend bug.
+ *
+ * Added for this app: WordFreqFile, the name the user gave the file,
+ * and ExitBySignal/ExitSignal, which distinguish "the program was
+ * killed" from "the program returned an error" -- different sentences
+ * for the user.
  */
 export const JOB_ATTRS = [
   'ClusterId',
@@ -76,10 +107,19 @@ export const JOB_ATTRS = [
   'JobBatchName',
   'QDate',
   'ExitCode',
+  'ExitBySignal',
+  'ExitSignal',
   'HoldReason',
+  'WordFreqFile',
 ] as const satisfies readonly string[];
 
-/** A job as the API returns it: a ClassAd, so the fields are loose. */
+/**
+ * A job as the API returns it: a ClassAd, so the fields are loose.
+ *
+ * Which of these are actually populated depends on the `projection`
+ * sent with the query -- see JOB_ATTRS above. Most of them are NOT in
+ * the server's default projection.
+ */
 export interface Job {
   ClusterId: number;
   ProcId: number;
@@ -90,6 +130,8 @@ export interface Job {
   QDate?: number;
   HoldReason?: string;
   ExitCode?: number;
+  ExitBySignal?: boolean;
+  ExitSignal?: number;
   [attr: string]: unknown;
 }
 
@@ -176,16 +218,38 @@ export const api = {
    * job is still in the queue and can be released. Calling it
    * "cancelled" in the interface would be the kind of lie AGENTS.md
    * tells you not to tell.
+   *
+   * The reason is optional in the API and worth sending anyway: it
+   * comes back as HoldReason, so the job then reads "Stopped: you
+   * stopped this file" instead of a bare "Stopped", and the user can
+   * tell their own click apart from the pool holding the job.
    */
-  hold: (jobId: string) =>
-    request<void>(`/jobs/${encodeURIComponent(jobId)}/hold`, { method: 'POST' }),
+  hold: (jobId: string, reason = 'You stopped this file') =>
+    request<void>(`/jobs/${encodeURIComponent(jobId)}/hold`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
 
   /** Release a held job so it can run again. */
   release: (jobId: string) =>
     request<void>(`/jobs/${encodeURIComponent(jobId)}/release`, { method: 'POST' }),
 
+  /** The job's standard output, as text. This is the readable report. */
+  stdout: (jobId: string) => requestText(`/jobs/${encodeURIComponent(jobId)}/stdout`),
+
+  /** The job's standard error, as text. Only read when something failed. */
+  stderr: (jobId: string) => requestText(`/jobs/${encodeURIComponent(jobId)}/stderr`),
+
+  /** One named file from the job's output sandbox, as text. */
+  jobFile: (jobId: string, name: string) =>
+    requestText(`/jobs/${encodeURIComponent(jobId)}/files/${encodeURIComponent(name)}`),
+
   /** URL for the job's output sandbox as a tar. Use as an href. */
   outputUrl: (jobId: string) => `${BASE}/jobs/${encodeURIComponent(jobId)}/output`,
+
+  /** URL for one named file from the job's sandbox. Use as an href. */
+  fileUrl: (jobId: string, name: string) =>
+    `${BASE}/jobs/${encodeURIComponent(jobId)}/files/${encodeURIComponent(name)}`,
 
   /**
    * Site submit templates, if this access point defines any. A template
@@ -208,29 +272,57 @@ export const JobStatus = {
   Completed: 4,
   Held: 5,
   Transferring: 6,
+  Suspended: 7,
 } as const;
+
+/** True while the job is still going to produce something. */
+export function isActive(job: Job): boolean {
+  return (
+    job.JobStatus === JobStatus.Idle ||
+    job.JobStatus === JobStatus.Running ||
+    job.JobStatus === JobStatus.Transferring ||
+    job.JobStatus === JobStatus.Suspended
+  );
+}
+
+/** True once the job has counted the words and brought the results back. */
+export function isFinished(job: Job): boolean {
+  return job.JobStatus === JobStatus.Completed && job.ExitCode === 0;
+}
 
 /**
  * A label for a job's state, in words the user can act on.
  *
- * Status 1 with no start time usually means the input upload has not
- * finished, which users read as "stuck" unless told otherwise. Being
- * specific here costs one line and saves a support email.
+ * Every branch here depends on an attribute that is only present
+ * because JOB_ATTRS asked for it. ExitCode in particular: without it
+ * the Completed branch reads `undefined` and reports a successful job
+ * as "Failed (exit undefined)", which is worse than saying nothing.
  */
 export function jobStatusLabel(job: Job): string {
   switch (job.JobStatus) {
     case JobStatus.Idle:
-      return job.QDate && Date.now() / 1000 - job.QDate < 30 ? 'Starting' : 'Waiting for a slot';
+      return job.QDate && Date.now() / 1000 - job.QDate < 30
+        ? 'Starting'
+        : 'Waiting for a free computer';
     case JobStatus.Running:
-      return 'Running';
+      return 'Counting words';
     case JobStatus.Removed:
       return 'Cancelled';
     case JobStatus.Completed:
-      return job.ExitCode === 0 ? 'Finished' : `Failed (exit ${job.ExitCode})`;
+      if (job.ExitCode === 0) return 'Finished';
+      // ExitBySignal means the program was killed rather than exiting,
+      // which for this job means it ran out of memory or time far more
+      // often than it means a bug. Saying "exit 137" to a linguist is
+      // not an error message.
+      if (job.ExitBySignal) return 'Stopped by the system before it finished';
+      if (typeof job.ExitCode === 'number') return "Didn't finish — see the details";
+      return 'Finished, but the result is unclear';
     case JobStatus.Held:
       return job.HoldReason ? `Stopped: ${job.HoldReason}` : 'Stopped';
     case JobStatus.Transferring:
       return 'Copying results back';
+    case JobStatus.Suspended:
+      return 'Paused by the system';
     default:
       return 'Unknown';
   }
