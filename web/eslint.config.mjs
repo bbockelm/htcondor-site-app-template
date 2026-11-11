@@ -1,4 +1,5 @@
 import js from '@eslint/js';
+import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
@@ -7,7 +8,7 @@ export default tseslint.config(
   ...tseslint.configs.recommended,
   {
     languageOptions: {
-      globals: { window: 'readonly', document: 'readonly', fetch: 'readonly', FormData: 'readonly', File: 'readonly', FileList: 'readonly', setInterval: 'readonly', clearInterval: 'readonly', Date: 'readonly', console: 'readonly', process: 'readonly' },
+      globals: globals.browser,
     },
     rules: {
       '@typescript-eslint/no-non-null-assertion': 'off',

@@ -149,7 +149,13 @@ export function buildSubmitFile(opts: RunOptions): string {
     ``,
     // A batch name is how the app finds its own jobs later without
     // keeping a database: the queue is the record.
-    `JobBatchName = ${quote(opts.pipeline)}`,
+    // batch_name, not `JobBatchName =`. This API's submit parser
+    // happens to accept both, but condor_submit's keyword table has
+    // only batch_name -- an assignment to a name that is not a submit
+    // command defines a MACRO and sets nothing on the job. Writing
+    // the portable one means a submit file you paste into
+    // condor_submit behaves the same way it does here.
+    `batch_name = ${quote(opts.pipeline)}`,
     ``,
     `queue 1`,
     ``,

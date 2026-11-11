@@ -65,12 +65,13 @@ Two complete apps, each on its own branch. They are not extra folders to wade th
 | --- | --- | --- |
 | [`example/word-frequency`](../../tree/example/word-frequency) | Counts word frequencies in dropped text files, one job per file | A sortable results table drawn from the job's `results.json`, and an awk program generated in the browser so no user text ever reaches the submit file |
 | [`example/blast`](../../tree/example/blast) | Searches many query files against one uploaded reference database | What to do when a large input is shared by many jobs — including telling the user what their submission will cost before they press the button |
+| [`example/astro-fits`](../../tree/example/astro-fits) | Statistics and rendered previews from Hubble FITS images, with astropy | Getting a **binary** result — a picture — back to the page, and a job whose program is generated and uploaded rather than inlined |
 
 ```bash
 git diff main..example/blast -- web/src
 ```
 
-Both were written from this repository alone, by someone with no other context, which is also how most of its sharper edges were found. Each is pinned to the template as it stood when it was written, so expect small drift from `main`.
+All three were written from this repository alone, by someone with no other context, which is also how most of its sharper edges were found. Each is pinned to the template as it stood when it was written, so expect small drift from `main`.
 
 ## What not to do
 

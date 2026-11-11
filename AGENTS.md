@@ -6,10 +6,14 @@ Read this before writing code. Most of what follows is not guessable from the so
 
 **How to use this file.** The rules below are mostly scar tissue — each one is a mistake somebody already made, with the reason it was not obvious. When you hit a problem this file does not name, the shape of an answer is usually one of:
 
-- *Can the server tell me, instead of me guessing?* `openapi.json` is committed at the repo root; `GET /api/v1/auth/me` reports who the user is and what they can see.
-- *Can I move the cost somewhere cheaper?* The shared-input section below is the worked example: the same data, uploaded once by a DAG instead of once per job.
-- *Can I make the failure explain itself?* Creating output files up front, naming a hold in words, showing the server's own error text — all of these turn "it broke" into something the user can act on.
-- *Has somebody already solved this here?* Two complete apps live on the `example/word-frequency` and `example/blast` branches. `git diff main..example/blast -- web/src` is often faster than reasoning from first principles — the BLAST one in particular works through a large shared input end to end.
+- **Ask the server before you guess.** Read `openapi.json` at the repo root *first*, before `api.ts` — the client here is a convenience wrapper over a much larger API, and the routes it does not wrap are the ones you will need. More than one app has shipped a worse design because its author never looked.
+- **Go and read the examples.** Three complete apps, each a branch you can diff against this one:
+
+  ```bash
+  git diff main..example/blast -- web/src
+  ```
+
+  `example/word-frequency` (per-file jobs, a sortable results table), `example/blast` (one large shared input across many jobs, with the cost shown before the button), `example/astro-fits` (binary results — a rendered image — and a generated Python job).
 
 If you solve something this file does not cover, add it here. The next person is in your position with less time.
 
@@ -18,6 +22,8 @@ If you solve something this file does not cover, add it here. The next person is
 The app talks to the HTCondor HTTP API at `/api/v1/*` on its own origin.
 
 **Do not invent endpoints.** The API is larger than `web/src/lib/api.ts` and not larger in the way you are about to assume. Check `openapi.json` in this repository before adding a call — it is a copy of the spec the server serves at `/openapi.json`, committed here so you can read it without a running server. A plausible-looking REST route that does not exist is the single most common failure in this codebase.
+
+**A job you created but never fed cannot be cleaned up.** `POST /jobs` succeeds, then your input upload fails — a dropped connection part-way through a large file. The job now sits held under `SpoolingInput` forever: `hold` is a no-op on an already-held job, `DELETE` answers 501, and **no call your app can make will clear it**. This is not a rare case if your inputs are large; it is the likely failure. Plan for it: upload promptly after submitting, and when the upload fails tell the user plainly which job id was stranded and that an administrator must `condor_rm` it. Saying nothing leaves them with a job they cannot explain or remove.
 
 **Some documented routes are not implemented.** Read each description, not just the path: `DELETE /jobs/{id}` and `PATCH /jobs/{id}` are both in the spec and both answer `501`, and the words "NOT YET IMPLEMENTED" are the only warning. To stop a job, hold it (`POST /jobs/{id}/hold`); call it "stop", not "cancel", because a held job is still in the queue and can be released.
 
@@ -37,9 +43,15 @@ The specifics, from the HTCondor source rather than from memory:
 - **One missing file loses the whole set.** The upload returns on the first file it cannot read, so the other declared outputs do not come back either. Pre-create *all* of them, which is why `OUTPUT_FILES` is one list feeding both the declaration and the `: >` lines.
 - **`when_to_transfer_output = ON_EXIT` still transfers after a non-zero exit.** The starter transfers whenever the job ran to completion on its own; it skips transfer only when the job was told to exit (evicted or removed). So pre-creating the files genuinely protects the failure path — if it did not, this rule would buy nothing where it matters most.
 
+**Getting one file back — including a picture.** `GET /api/v1/jobs/{id}/files/{filename}` serves a single file from the job's sandbox. That is how a result that is an *image* reaches the page: point an `<img src>` straight at it. Three things that bite:
+
+- **Do not fetch it into a `blob:` URL.** The obvious shape — `fetch` → `Blob` → `URL.createObjectURL` → `<img>` — is blocked by the server's `Content-Security-Policy: default-src 'self'`, because `blob:` is not `'self'`. Nothing throws. The image is simply absent, *and it works perfectly in `make dev`*, which has no CSP. This is the worst kind of failure this platform produces: correct locally, silently broken when deployed.
+- **A pre-created output file is a zero-byte file when the job fails.** The rule above says create every declared output at the start, which is right — but an `<img>` pointed at zero bytes renders a broken-image icon, and users read that as "this app is broken" rather than "this job failed". Decide whether a picture exists from your `results.json`, never from whether the file exists.
+- Treat a 404 as routine rather than an error: the sandbox is not there before the job finishes, and does not stay forever.
+
 **Keep the structured file small enough to render.** It is what the *page* draws, not an archive. If your results can run to thousands of rows, put the top N in the JSON and the full set in a CSV the user downloads — a browser handed 600 KB of JSON to turn into a table will show it, slowly, and nobody thanks you. The example emits two fields, so it never meets this question; yours will.
 
-**A large shared input is uploaded once per job. There is no shared stage.** This is the decision that determines whether your app costs a gigabyte or a hundred, so make it deliberately.
+**A large shared input is uploaded once per job. There is no shared stage.** If nothing is shared between your jobs — each task has its own inputs and no common reference — this section is moot and the cost is simply the sum of what the user picked. Show them that number anyway. If there *is* a shared input, this is the decision that determines whether your app costs a gigabyte or a hundred, so make it deliberately.
 
 The API offers exactly two ways to get a file to a job: `POST /jobs`, which takes a submit file and nothing else, and `POST /jobs/{id}/input/multipart`, which uploads into **one job's** sandbox — the path is a `cluster.proc`, not a cluster. Nothing stores a file once and hands back a name many jobs can use. So a reference input — a BLAST database, a genome, an atlas, model weights — travels once for every job that needs it, out of the user's uplink and into the access point's spool.
 

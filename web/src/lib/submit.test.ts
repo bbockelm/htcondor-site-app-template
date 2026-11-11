@@ -226,3 +226,12 @@ describe('structured output is valid JSON whatever the user typed', () => {
     expect(f).not.toContain('"pipeline":"a"b"');
   });
 });
+
+// batch_name is the documented submit command; `JobBatchName =` works
+// through this API's parser but is a macro to condor_submit, so a
+// submit file written that way behaves differently in the two places.
+it('sets the batch name with the portable submit command', () => {
+  const names = commandNames(buildSubmitFile({ pipeline: 'align', inputNames: [], cpus: 1, memoryMB: 512 }));
+  expect(names).toContain('batch_name');
+  expect(names).not.toContain('jobbatchname');
+});
