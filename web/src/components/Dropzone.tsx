@@ -1,9 +1,17 @@
-import { useRef, useState, type DragEvent } from 'react';
+import { useRef, useState, type DragEvent, type ReactNode } from 'react';
 
 interface Props {
   files: File[];
   onChange: (files: File[]) => void;
   disabled?: boolean;
+  /** What the drop target says. */
+  prompt?: string;
+  /** `accept` on the file input, so the picker opens on the right files. */
+  accept?: string;
+  /** Extra control for each listed file -- here, which colour it becomes. */
+  renderExtra?: (file: File) => ReactNode;
+  /** A sentence under a file, e.g. a reason it will be rejected. */
+  fileNote?: (file: File) => string | null;
 }
 
 /**
@@ -13,7 +21,15 @@ interface Props {
  * cannot be reached from the keyboard is unusable for some people and
  * merely annoying on a laptop trackpad for everyone else.
  */
-export function Dropzone({ files, onChange, disabled }: Props) {
+export function Dropzone({
+  files,
+  onChange,
+  disabled,
+  prompt = 'Drop input files here, or choose files',
+  accept,
+  renderExtra,
+  fileNote,
+}: Props) {
   const [over, setOver] = useState(false);
   const input = useRef<HTMLInputElement>(null);
 
@@ -55,20 +71,25 @@ export function Dropzone({ files, onChange, disabled }: Props) {
           ref={input}
           type="file"
           multiple
+          accept={accept}
           data-testid="file-input"
           onChange={(e) => {
             add(e.target.files);
             e.target.value = '';
           }}
         />
-        Drop input files here, or choose files
+        {prompt}
       </div>
 
       {files.length > 0 && (
         <ul className="files" data-testid="file-list">
           {files.map((f) => (
             <li key={f.name}>
-              <span className="name">{f.name}</span>
+              <span className="name">
+                {f.name}
+                {fileNote?.(f) && <span className="meta note">{fileNote(f)}</span>}
+              </span>
+              {renderExtra?.(f)}
               <span className="size">{formatSize(f.size)}</span>
               <button
                 type="button"

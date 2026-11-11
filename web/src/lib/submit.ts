@@ -1,59 +1,46 @@
 // Building the submit file.
 //
-// This is the part that is genuinely about your science, and the part
-// you are meant to replace. It is a plain string builder on purpose:
-// a submit file is text, the format is documented, and a template
-// engine between you and it would only hide the thing you need to read
-// when a job does not run.
+// The science is in fits.ts (what the choices mean) and runner.ts (what
+// the job does). This file is the narrow part in the middle: turning
+// one job's worth of that into HTCondor submit-file text.
 //
-// What NOT to put here:
-//   - A log location, an accounting group, or anything else the access
-//     point requires. The server applies site policy to every job.
-//   - Anything derived from user input without escaping. See below.
+// WHAT IS DELIBERATELY NOT HERE
 //
-// TWO THINGS ABOUT OUTPUT, both learned the hard way:
+//   A log location, an accounting group, a concurrency limit, a
+//   requirements expression naming a container image. The access point
+//   applies its own policy to everything this app submits; writing it
+//   here is redundant at best and fights the operator at worst.
 //
-//  1. Have the job write a STRUCTURED result -- JSON -- alongside
-//     whatever it prints for a human. A page that can read
-//     {"rows": [...]} can draw a table, sort it, and show the top ten;
-//     a page handed a block of text can only put it in a <pre>. The
-//     job is the only place that knows the shape of its own output, so
-//     emitting JSON there costs one line and saves the interface from
-//     parsing prose.
+// TWO THINGS ABOUT OUTPUT
 //
-//  2. HTCondor HOLDS a job whose declared output file does not exist
-//     when it finishes. So a job that writes results.json only on
-//     success is held on every failure -- and held for "missing
-//     output", which says nothing about what actually went wrong. The
-//     user sees a job stuck in a state nobody can explain.
+//  1. The job writes STRUCTURED results -- results.json -- which the
+//     page draws. It also writes a PNG, which is a different kind of
+//     result and is fetched a different way; see Results.tsx.
 //
-//     Fix: create the file at the START, before anything can fail.
-//     `: > results.json` costs nothing and means the failure path
-//     returns an empty-but-present file, so the job fails with its
-//     real error instead of a misleading hold.
+//  2. HTCondor HOLDS a job whose declared output file is missing when
+//     it finishes, and the hold reads as a file-transfer error, which
+//     says nothing about what actually went wrong. So both declared
+//     outputs are created empty in `arguments`, before the Python is
+//     even read -- a syntax error in the runner then comes back as a
+//     failure with a message rather than as a hold nobody can explain.
+//
+//     The cost of that rule, which is worth knowing: an empty
+//     preview.png comes back from every failed job. An <img> pointed
+//     at a zero-byte PNG shows a broken-image icon. So the page must
+//     decide from results.json whether a picture exists, never from
+//     whether the file does. See Results.tsx.
 
-/**
- * Files the job brings back, declared and pre-created from one list.
- *
- * ONE list, not two: a declaration and a creation that can drift apart
- * is the bug this whole arrangement exists to prevent. Declare a file
- * the job never creates and HTCondor holds it; create one you never
- * declare and it is thrown away with the sandbox.
- */
-export const OUTPUT_FILES = ['results.json'] as const;
+import { PREVIEW_FILE, RUNNER_FILE, OUTPUT_FILES } from './runner';
+import { isSafeFileName, requestDiskKB, requestMemoryMB } from './fits';
 
-/** Knobs this example exposes. Replace with your own. */
-export interface RunOptions {
-  pipeline: string;
-  inputNames: string[];
-  cpus: number;
-  memoryMB: number;
-}
+/** Every job this app submits carries a batch name starting with this. */
+export const BATCH_PREFIX = 'fitsprev-';
+
+/** One CPU: the work is reading a file and one pass over an array. */
+const REQUEST_CPUS = 1;
 
 /**
  * Quote a value for a submit-file command.
- *
- * Two separate hazards, both easy to miss:
  *
  *   `$(...)` and `$$(...)` are macro substitutions evaluated by the
  *   submit processor, and `$ENV(HOME)` reads the environment of the
@@ -61,99 +48,100 @@ export interface RunOptions {
  *   A file name a user typed must not be able to reach either. `$` is
  *   escaped as `$(DOLLAR)`, which is the documented literal.
  *
- *   Newlines end a command. One in a value turns the rest of the line
- *   into a new submit command of the user's choosing.
+ *   A newline ends a command, so one inside a value turns the rest of
+ *   the line into a new submit command of the user's choosing.
  */
-/**
- * Encode a value as a JSON string literal, for a job that builds JSON
- * with printf or echo.
- *
- * "Have the job write JSON" is good advice that quietly assumes the
- * values are safe to interpolate. They are not: a pipeline name
- * containing a double quote produces a results.json the page cannot
- * parse, on a job that ran perfectly. Worse, the failure surfaces in
- * the browser as a parse error, nowhere near the cause.
- *
- * Two other ways to get this wrong, both seen in practice:
- *   - `awk -v name=...` EXPANDS escape sequences in the value, so a
- *     name containing a literal backslash-t arrives as a real tab and
- *     lands as a control character in your JSON.
- *   - A newline in a value does the same thing.
- *
- * JSON.stringify handles all of it. Use it, and interpolate the result
- * WITHOUT adding quotes of your own -- it brings its own.
- */
-export function jsonString(value: string): string {
-  return JSON.stringify(value);
-}
-
 export function quote(value: string): string {
-  return value.replace(/\$/g, '$(DOLLAR)').replace(/[\r\n]+/g, ' ').trim();
+  return value
+    .replace(/\$/g, '$(DOLLAR)')
+    .replace(/[\r\n]+/g, ' ')
+    .trim();
 }
 
-/** Reject a file name that cannot safely be a transfer entry. */
 /**
- * Reject a file name that cannot safely be a transfer entry.
+ * Quote a value as a ClassAd string literal, quotes included.
  *
- * An allow-list, not a block-list. The name goes into a
- * comma-separated `transfer_input_files`, into a multipart
- * Content-Disposition filename, and in most apps onto a shell command
- * line. A rule written as "no slashes, no newlines" let through
- * `my file.fa`, `$(x).fa`, `-rf.fa` and `a"b.fa` -- every one of which
- * is a problem somewhere along that path.
- *
- * Tell the user which file to rename. That is a better experience than
- * a job held for a reason nobody can read.
+ * Separate from `quote` and applied FIRST, because the two are about
+ * different layers: this one is the ClassAd grammar, that one is macro
+ * expansion, and macro expansion happens before the ClassAd is parsed.
+ * Doing them the other way round would let this function's backslashes
+ * be reinterpreted.
  */
-export function isSafeFileName(name: string): boolean {
-  return name.length > 0 && name.length <= 255 && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name);
+export function adString(value: string): string {
+  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\r\n]+/g, ' ')}"`;
 }
 
-export function buildSubmitFile(opts: RunOptions): string {
-  const inputs = opts.inputNames.filter(isSafeFileName).map(quote);
+export interface JobSpec {
+  /** Names in the sandbox, each already passing isSafeFileName. */
+  inputNames: string[];
+  /** Total bytes of those inputs, for the resource requests. */
+  inputBytes: number;
+  /** Groups one submission's jobs in the queue. Starts with BATCH_PREFIX. */
+  batchName: string;
+  /** What to call this job in the list. Arbitrary user text. */
+  title: string;
+}
 
-  // Note the `: >` before any real work: see the comment at the top of
-  // this file. The job creates its structured output first so that a
-  // failure is reported as the failure it was, not as a hold for a
-  // missing file.
-  const script = [
-    ...OUTPUT_FILES.map((f) => `: > ${f}`),
-    `echo running ${quote(opts.pipeline)} on ${inputs.length} file(s)`,
-    `ls -l`,
-    // Whatever the real work is, have it end by writing JSON the page
-    // can render rather than text the page has to parse.
-    // jsonString, not quote: a name with a double quote in it would
-    // otherwise produce JSON the page cannot parse, on a job that
-    // ran perfectly.
-    `printf '{"pipeline":%s,"inputs":%d}\\n' ${quote(jsonString(opts.pipeline))} ${inputs.length} > results.json`,
-  ].join('; ');
+export function buildSubmitFile(spec: JobSpec): string {
+  const inputs = [RUNNER_FILE, ...spec.inputNames.filter(isSafeFileName)].map(quote);
+
+  // `: >` before anything else, in `arguments` rather than inside the
+  // Python, so that a runner that cannot even be parsed still fails as
+  // itself instead of as a missing-output hold.
+  const prepare = OUTPUT_FILES.map((f) => `: > ${f}`).join('; ');
 
   return [
+    `# FITS statistics and preview. Generated by the FITS Previews site app;`,
+    `# site policy (log location, accounting group) is applied by the access`,
+    `# point and is deliberately absent here.`,
+    ``,
+    // /usr/bin/env, not the Python file: the runner arrives as an input
+    // and inputs are uploaded AFTER the job is created, so naming it as
+    // the executable would mean submitting against a file that does not
+    // exist yet.
     `executable = /usr/bin/env`,
     `transfer_executable = false`,
-    `arguments = "bash -c '${script}'"`,
+    `arguments = "bash -c '${prepare}; exec python3 ${RUNNER_FILE}'"`,
     ``,
-    `request_cpus = ${Math.max(1, Math.floor(opts.cpus))}`,
-    `request_memory = ${Math.max(128, Math.floor(opts.memoryMB))}`,
-    `request_disk = 1024`,
+    `request_cpus = ${REQUEST_CPUS}`,
+    `request_memory = ${requestMemoryMB(spec.inputBytes)}`,
+    `request_disk = ${requestDiskKB(spec.inputBytes)}`,
     ``,
     `should_transfer_files = YES`,
     `when_to_transfer_output = ON_EXIT`,
-    inputs.length ? `transfer_input_files = ${inputs.join(',')}` : ``,
+    `transfer_input_files = ${inputs.join(',')}`,
+    // Declared, so they come back by name whatever else the job left
+    // lying around -- and created at the start of the job, so declaring
+    // them cannot turn a failure into a hold.
+    `transfer_output_files = ${OUTPUT_FILES.join(',')}`,
     ``,
     `output = stdout.txt`,
     `error = stderr.txt`,
-    // Declared, so it comes back -- and created at the start of the
-    // job, so declaring it cannot turn a failure into a hold.
-    `transfer_output_files = ${OUTPUT_FILES.join(',')}`,
     ``,
-    // A batch name is how the app finds its own jobs later without
-    // keeping a database: the queue is the record.
-    `JobBatchName = ${quote(opts.pipeline)}`,
+    // `batch_name`, NOT `JobBatchName = ...`.
+    //
+    // A submit file is not a ClassAd. An assignment to a name that is
+    // not a submit command defines a submit MACRO and sets nothing on
+    // the job, so `JobBatchName = x` leaves the job ad without a
+    // JobBatchName and the constraint in app.tsx matches nothing. The
+    // job list then stays empty forever, with no error anywhere.
+    `batch_name = ${quote(spec.batchName)}`,
+    // Custom job attributes, which is what a leading `+` means in a
+    // submit file. The queue is this app's only record of what was
+    // submitted, so the name the user gave a file is stored on the job
+    // and read back through the projection in api.ts. If an access
+    // point were to strip them the list falls back to the job id.
+    `+FitsTitle = ${quote(adString(spec.title))}`,
+    `+FitsPreview = ${quote(adString(PREVIEW_FILE))}`,
     ``,
     `queue 1`,
     ``,
-  ]
-    .filter((line) => line !== undefined)
-    .join('\n');
+  ].join('\n');
+}
+
+/** A batch name grouping one submission's jobs. Safe by construction. */
+export function batchNameFor(mode: string, when = new Date()): string {
+  const stamp = when.toISOString().replace(/[-:T]/g, '').slice(0, 14);
+  const kind = mode === 'composite' ? 'colour' : 'each';
+  return `${BATCH_PREFIX}${kind}-${stamp}`;
 }

@@ -80,6 +80,12 @@ export const JOB_ATTRS = [
   // Needed to tell 'spooling your input' (16) apart from a real
   // problem. Without it every just-submitted job reads as failed.
   'HoldReasonCode',
+  // Set by this app with `+FitsTitle` in the submit file. The queue is
+  // the only record this app keeps, so the name the user gave a file
+  // has to live on the job or the list cannot say which image is which
+  // after a reload.
+  'FitsTitle',
+  'FitsPreview',
 ] as const satisfies readonly string[];
 
 /** A job as the API returns it: a ClassAd, so the fields are loose. */
@@ -94,6 +100,8 @@ export interface Job {
   HoldReason?: string;
   HoldReasonCode?: number;
   ExitCode?: number;
+  FitsTitle?: string;
+  FitsPreview?: string;
   [attr: string]: unknown;
 }
 
@@ -207,6 +215,58 @@ export const api = {
   outputUrl: (jobId: string) => `${BASE}/jobs/${encodeURIComponent(jobId)}/output`,
 
   /**
+   * URL for ONE named file out of a finished job's sandbox.
+   *
+   * This is how a result that is a PICTURE gets to the page, and the
+   * mechanism is worth being explicit about, because the obvious
+   * alternative does not work here:
+   *
+   *   fetch() the bytes, URL.createObjectURL(blob), point an <img> at
+   *   the blob: URL -- which the access point's
+   *   `Content-Security-Policy: default-src 'self'` blocks, because
+   *   blob: is not 'self'. The image silently does not appear.
+   *
+   * Used directly as an <img src>, this URL is same-origin, so the CSP
+   * allows it and the browser attaches the session cookie exactly as
+   * it does for an API call. No fetch, no blob, no base64 in the page,
+   * and the browser's own cache does the right thing when the list
+   * re-renders.
+   *
+   * The server sets Content-Type from the file's own bytes
+   * (http.DetectContentType), so a real PNG arrives as image/png
+   * without the app having to say so.
+   */
+  fileUrl: (jobId: string, name: string) =>
+    `${BASE}/jobs/${encodeURIComponent(jobId)}/files/${encodeURIComponent(name)}`,
+
+  /**
+   * One named file out of a job's sandbox, as text.
+   *
+   * `request` assumes JSON and this endpoint does not promise it: the
+   * Content-Type is sniffed from the bytes, and the bytes of an empty
+   * pre-created results.json are not JSON. Read text, parse upstairs,
+   * and let parseResults turn "empty" into a sentence.
+   *
+   * A 404 here is routine, not an error worth shouting about: the
+   * sandbox is not there until the job's output has been transferred
+   * back.
+   */
+  jobFileText: async (jobId: string, name: string): Promise<string> => {
+    const res = await fetch(
+      `${BASE}/jobs/${encodeURIComponent(jobId)}/files/${encodeURIComponent(name)}`,
+      { credentials: 'include' },
+    );
+    if (res.status === 401) {
+      redirectToLogin();
+      throw new ApiError(401, 'Session expired');
+    }
+    if (!res.ok) {
+      throw new ApiError(res.status, `${name} is not among this job's results yet`);
+    }
+    return res.text();
+  },
+
+  /**
    * Site submit templates, if this access point defines any. A template
    * is a submit-file body plus the column names it expects.
    *
@@ -228,6 +288,7 @@ export const api = {
  * output file was missing at the end -- see AGENTS.md.
  */
 export const HoldReasonCode = {
+  DownloadFileError: 12,
   UploadFileError: 13,
   SpoolingInput: 16,
 } as const;
@@ -254,23 +315,53 @@ export function jobStatusLabel(job: Job): string {
     case JobStatus.Idle:
       return job.QDate && Date.now() / 1000 - job.QDate < 30 ? 'Starting' : 'Waiting for a slot';
     case JobStatus.Running:
-      return 'Running';
+      return 'Processing';
     case JobStatus.Removed:
       return 'Cancelled';
     case JobStatus.Completed:
-      return job.ExitCode === 0 ? 'Finished' : `Failed (exit ${job.ExitCode})`;
+      // Not "exit 65". The job always writes a message into
+      // results.json saying what went wrong in words; the list says
+      // only that something did, and the results panel says what.
+      return job.ExitCode === 0 ? 'Finished' : 'Finished with a problem';
     case JobStatus.Held:
-      // Code 16 is SpoolingInput: the job is held because the server
-      // is waiting for the input upload that always follows submit.
-      // It is the state EVERY job passes through, and calling it
-      // "Stopped" tells the user their new job failed.
-      if (job.HoldReasonCode === HoldReasonCode.SpoolingInput) {
-        return 'Uploading your files';
-      }
-      return job.HoldReason ? `Stopped: ${job.HoldReason}` : 'Stopped';
+      return heldLabel(job);
     case JobStatus.Transferring:
       return 'Copying results back';
     default:
       return 'Unknown';
   }
+}
+
+function heldLabel(job: Job): string {
+  switch (job.HoldReasonCode) {
+    case HoldReasonCode.SpoolingInput:
+      // NOT an error. Every job passes through this between POST /jobs
+      // and the input upload, and for this app -- where the input is a
+      // few hundred megabytes of FITS -- it is where the job spends
+      // most of its life. Calling it "Stopped" would tell the user
+      // their submission failed, every single time, for minutes.
+      return 'Receiving your image';
+    case HoldReasonCode.DownloadFileError:
+      return 'The image could not be copied to the compute node';
+    case HoldReasonCode.UploadFileError:
+      return 'The results could not be copied back';
+    default:
+      return job.HoldReason ? `Stopped: ${job.HoldReason}` : 'Stopped';
+  }
+}
+
+/**
+ * True while a job is still waiting for the files the app is uploading.
+ *
+ * Keeps the Stop control away from a job that is mid-upload: holding an
+ * already-held job does nothing visible, and the state is not a problem
+ * to be fixed.
+ */
+export function isReceivingFiles(job: Job): boolean {
+  return job.JobStatus === JobStatus.Held && job.HoldReasonCode === HoldReasonCode.SpoolingInput;
+}
+
+/** True once the job has stopped and its sandbox can be read. */
+export function isFinished(job: Job): boolean {
+  return job.JobStatus === JobStatus.Completed;
 }
