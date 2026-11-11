@@ -209,6 +209,8 @@ export interface PlanFile {
 export interface Plan {
   /** Clusters this submission becomes. */
   jobs: number;
+  /** Frames in it. Equal to `jobs` only in 'each' mode. */
+  images: number;
   /** Bytes the browser pushes to the access point. */
   uploadBytes: number;
   /** Fatal: the submit button stays disabled and this is shown. */
@@ -293,7 +295,7 @@ export function plan(opts: Options, files: readonly PlanFile[]): Plan {
     );
   }
 
-  return { jobs, uploadBytes, blocker, warnings };
+  return { jobs, images: files.length, uploadBytes, blocker, warnings };
 }
 
 /** The sentence shown above the submit button. */
@@ -301,9 +303,9 @@ export function planSentence(opts: Options, p: Plan): string {
   if (p.jobs === 0) return 'Add FITS images to begin.';
   if (opts.mode === 'composite') {
     return (
-      `One job, combining ${p.jobs === 1 ? 'your' : ''} images into a single colour picture. ` +
-      `${formatBytes(p.uploadBytes)} is uploaded from this computer; that is the slow part, ` +
-      `and the processing itself takes seconds.`
+      `One job, combining ${p.images} filters into a single colour picture — they have to be in ` +
+      `the same job to be combined. ${formatBytes(p.uploadBytes)} is uploaded from this ` +
+      `computer; that is the slow part, and the processing itself takes seconds.`
     );
   }
   return (

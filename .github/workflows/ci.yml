@@ -53,7 +53,7 @@ jobs:
           # Pin this to a release tag in your own repository. `latest`
           # here means the template tracks the current server; in a lab
           # repo it means your CI breaks on somebody else's release.
-          API_IMAGE: ghcr.io/bbockelm/golang-htcondor:latest
+          API_IMAGE: ghcr.io/bbockelm/golang-htcondor:devel
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

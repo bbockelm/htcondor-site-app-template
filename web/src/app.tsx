@@ -60,10 +60,14 @@ export function App() {
   const [me, setMe] = useState<Identity | null>(null);
   const [files, setFiles] = useState<File[]>([]);
   const [opts, setOpts] = useState<Options>(DEFAULT_OPTIONS);
-  const [channels, setChannels] = useState<Record<string, Channel>>({});
+  // Only the channels the user has CHANGED. The rest are derived from
+  // file order below, so there is no effect to run and no frame in
+  // which a freshly dropped file has no colour yet.
+  const [channelOverride, setChannelOverride] = useState<Record<string, Channel>>({});
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [open, setOpen] = useState<string | null>(null);
@@ -90,10 +94,19 @@ export function App() {
         found = await api.jobs();
       }
       setJobs(found.filter((j) => String(j.JobBatchName ?? '').startsWith(BATCH_PREFIX)));
+      setListError(null);
     } catch (e) {
-      if (!(e instanceof ApiError && e.status === 401)) {
-        setError(e instanceof Error ? e.message : String(e));
-      }
+      // Kept apart from the submission error, and phrased as what it
+      // is: the list is stale, nothing the user did has gone wrong,
+      // and it will try again by itself. Putting this in the same
+      // banner as a failed submission made every dropped poll look
+      // like the submit had failed.
+      if (e instanceof ApiError && e.status === 401) return;
+      const detail = e instanceof Error ? e.message : String(e);
+      setListError(
+        `Your runs could not be loaded (${detail}). Anything already submitted is still ` +
+          `running; this list will try again in a few seconds.`,
+      );
     }
   }, []);
 
@@ -103,18 +116,17 @@ export function App() {
     return () => clearInterval(t);
   }, [refresh]);
 
-  // Default channel assignment: in file order, and with two frames the
-  // outer two colours, because green is synthesised from them.
-  useEffect(() => {
-    setChannels((current) => {
-      const next: Record<string, Channel> = {};
-      const defaults: Channel[] = files.length === 2 ? ['red', 'blue'] : [...CHANNELS];
-      files.slice(0, CHANNELS.length).forEach((f, i) => {
-        next[f.name] = current[f.name] ?? defaults[i] ?? 'red';
-      });
-      return next;
+  // Channels in file order, except that two frames get the OUTER two
+  // colours -- green is synthesised from them by the job, so assigning
+  // a frame to green and leaving blue empty would throw a filter away.
+  const channels = useMemo(() => {
+    const defaults: Channel[] = files.length === 2 ? ['red', 'blue'] : [...CHANNELS];
+    const out: Record<string, Channel> = {};
+    files.forEach((f, i) => {
+      out[f.name] = channelOverride[f.name] ?? defaults[i] ?? 'red';
     });
-  }, [files]);
+    return out;
+  }, [files, channelOverride]);
 
   const planned = useMemo(
     () => plan(opts, files.map((f) => ({ name: f.name, bytes: f.size }))),
@@ -269,7 +281,7 @@ export function App() {
                     value={channels[f.name] ?? 'red'}
                     disabled={busy}
                     onChange={(e) =>
-                      setChannels((c) => ({ ...c, [f.name]: e.target.value as Channel }))
+                      setChannelOverride((c) => ({ ...c, [f.name]: e.target.value as Channel }))
                     }
                   >
                     {CHANNELS.map((c) => (
@@ -384,6 +396,11 @@ export function App() {
       </button>
 
       <h2>Your runs</h2>
+      {listError && (
+        <div className="notice warn" role="status" data-testid="list-error">
+          {listError}
+        </div>
+      )}
       {jobs.length === 0 ? (
         <p className="meta">Nothing yet. Submitted runs stay here until the access point ages
           them out of the queue.</p>

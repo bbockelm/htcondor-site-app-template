@@ -58,6 +58,14 @@ What follows from that:
 
 **Submit, then upload — and the job is HELD until you do.** The server submits with input spooling on, so between `POST /jobs` and the upload every job sits held under `HoldReasonCode 16` (`SpoolingInput`). That is normal. If your interface renders Held as "stopped" or "failed", it says so about every job the moment the user submits it, which is the first thing they will ever see. `jobStatusLabel` names this case, and `HoldReasonCode` is in `JOB_ATTRS` so it can. `POST /api/v1/jobs` creates the job; `POST /api/v1/jobs/{id}/input/multipart` sends its input files afterwards. Between the two the job sits in a transferring-input state that users read as "stuck". Do not reorder these, and do surface that state as something other than silence.
 
+**`batch_name`, not `JobBatchName = ...`.** A submit file is not a ClassAd. An assignment to a name that is not a submit command defines a submit *macro* and sets nothing on the job, so `JobBatchName = x` leaves the job ad without a `JobBatchName` — and an app that finds its own jobs with a `JobBatchName == ...` constraint then shows an empty list forever, with no error anywhere to say why. The submit command is `batch_name`. A custom attribute needs a leading `+`: `+MyThing = "x"`, and the value must be a ClassAd string *literal*, quotes included. Escape it for the ClassAd grammar first and for macro expansion second, because macro expansion happens before the ClassAd is parsed.
+
+**A result that is a PICTURE goes back as an `<img src>`, not as a fetch.** The obvious way — fetch the bytes, `URL.createObjectURL`, point an `<img>` at the `blob:` URL — is blocked by `default-src 'self'`, because `blob:` is not `'self'`. Nothing throws; the image is simply absent, and it works in `make dev` where there is no CSP. `GET /jobs/{id}/files/{filename}` is same-origin and sets `Content-Type` from the file's own bytes, so an `<img src>` pointing straight at it works, carries the session cookie, streams, and costs the page nothing even for a large image.
+
+  And the pre-create rule above has a consequence here that is worth saying out loud: a job that failed still brings back a **zero-byte** `preview.png`, because every declared output is created empty up front. An `<img>` pointed at zero bytes renders a broken-image icon, which a user reads as "this app is broken" rather than "this job failed". So decide whether a picture exists from the job's `results.json`, never from whether the file exists.
+
+**There is no way to remove a job, and that shapes the error path.** `DELETE /jobs/{id}` answers 501, and holding an already-held job does nothing. So if `POST /jobs` succeeds and the input upload that must follow it fails — a dropped connection half way through a 300 MB file — the job that was created sits held under `SpoolingInput` forever, visible to the user, and no API call the app can make will clear it. Say so in the error, and name the job id, so the user can ask an administrator to `condor_rm` it. Pretending it is not there is worse.
+
 **Do not set site policy in the submit file.** The server applies this access point's own defaults and overrides — a required log location, an accounting group, a concurrency limit — to everything this app submits. Writing them here is at best redundant and at worst fights the operator.
 
 ## Platform constraints
@@ -88,6 +96,10 @@ make bundle   # the deliverable: dist/<app>.zip plus its sha256
 ```
 
 `make check` is what CI runs first, so a failure here is a failure there.
+
+**`make e2e` does not run, against any published image.** `scripts/e2e.sh` passes `--demo-credentials-file`. `latest` and every `vN.N.N` tag of `ghcr.io/bbockelm/golang-htcondor` reject that flag outright, and the container exits before the script's own "an older server may predate it" guard can fire — so the error you get is `container exited early`, which points at the wrong thing. `devel` accepts the flag and then fails with `Demo mode failed: condor_master not found in PATH`: every one of these images is an Alpine layer containing the Go binary and nothing else, so `--demo` ("run in demo mode with mini condor") has no mini condor to run.
+
+  The default here is `devel`, because its failure at least names the real problem. Until an image ships with HTCondor in it, **the advice elsewhere in this file that `submit.ts` changes "always need `make e2e`" cannot be followed**, and the e2e job in `.github/workflows/ci.yml` is red on every commit. What stands in for it here: `web/src/lib/runner.test.ts` runs `python3` over every generated job program, and the Python was additionally run by hand against astropy and real multi-extension FITS files — which is how the primary-header bug in `header_summary` was found. Neither substitutes for a real schedd accepting the submit file.
 
 Changes to `web/src/lib/submit.ts` always need `make e2e`. The unit tests check the submit file's text; only a real schedd tells you whether it is a submit file it will accept.
 

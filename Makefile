@@ -7,8 +7,18 @@ APP ?= $(notdir $(CURDIR))
 
 # The API server to proxy to in development, and to test against.
 API ?= https://localhost:8443
-# Image used by `make e2e`. Pin a release tag in your own repo.
-API_IMAGE ?= ghcr.io/bbockelm/golang-htcondor:latest
+# Image used by `make e2e`.
+#
+# NOTHING PUBLISHED AT ghcr.io/bbockelm/golang-htcondor CAN RUN THIS.
+# `latest` and every vN.N.N tag reject the --demo-credentials-file flag
+# scripts/e2e.sh passes, and the container exits before the script's own
+# "an older server may predate it" guard can fire. `devel` accepts the
+# flag and then fails with "condor_master not found in PATH": every
+# image is an Alpine layer holding the Go binary and no HTCondor, so
+# --demo ("run in demo mode with mini condor") has no mini condor to
+# run. See AGENTS.md. `devel` is the default here only because its
+# failure is the honest one.
+API_IMAGE ?= ghcr.io/bbockelm/golang-htcondor:devel
 # Where demo mode writes its generated passwords, inside the container.
 DEMO_CREDS ?= /tmp/htcondor-demo-credentials.json
 

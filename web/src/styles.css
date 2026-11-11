@@ -114,7 +114,10 @@ ul.jobs li.job { display: block; padding: .5rem .25rem; }
 figure.preview { margin: 0 0 1rem; }
 figure.preview img {
   display: block;
-  width: 100%;
+  /* width:auto, not width:100%: the preview is made of real pixels and
+     upscaling a 512 px one to fill the column invents detail that is
+     not there. It shrinks to fit and never grows. */
+  width: auto;
   height: auto;
   max-width: 100%;
   background: #000;

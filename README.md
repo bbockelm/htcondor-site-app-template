@@ -1,8 +1,8 @@
-# HTCondor site app template
+# FITS Previews
 
-A starting point for a custom job submission interface served by an HTCondor access point, to your group, at your site.
+A job-submission interface for an HTCondor access point: drop FITS images, get statistics and a rendered preview back.
 
-Clone it with **Use this template** on GitHub. It already works: drop files, pick a pipeline, submit, watch the jobs run. Delete the parts you do not want rather than assembling the parts you do.
+Built from the [HTCondor site app template](https://github.com/bbockelm/htcondor-site-app-template).
 
 ```
 make dev      # dev server on :5173, proxying to an API server
@@ -10,6 +10,24 @@ make check    # lint, typecheck, test, build
 make bundle   # dist/<name>.zip + .sha256 — the thing you deploy
 make e2e      # the real API server in Docker, driven through a browser
 ```
+
+## What it does
+
+Two things, both of which are what you do first with a pile of new frames.
+
+**Look at each image separately.** One job per FITS file. Each job reports the shape and bit depth, the sky level, a median-absolute-deviation noise estimate, how many pixels are blank, and the handful of header cards that say what the frame actually is — `OBJECT`, `FILTER`, `EXPTIME`, `DATE-OBS` — and renders a greyscale PNG at the stretch and percentile clip you chose. That is the triage step: it is how you find out that a download is truncated, or that the frame labelled F814W is really F606W.
+
+**Combine filters into one colour picture.** Two or three frames, one per colour channel, in a *single* job — because the job cannot make a colour image out of one plane at a time. Each filter is scaled on its own cut, which is what makes a composite look like a colour image and also what makes the colour qualitative rather than photometric. The frames must already be on the same pixel grid; this app does not reproject.
+
+The options are deliberately few: stretch (asinh, log, square root, linear), how much of the brightest and faintest to clip, and the longest side of the preview. A free-text pair of black/white levels invites a typo that inverts the image with no error at all.
+
+### What it needs on the pool
+
+`python3` and `astropy`. Nothing else: the PNG is written with `zlib` and `struct` from the standard library rather than with matplotlib or Pillow, so there are two fewer things that can be missing from an execute node. When astropy is absent the job says so in a sentence naming astropy and telling the user to ask their administrator, rather than failing with a traceback.
+
+### What it costs
+
+Nothing is shared between jobs here, so there is no `jobs × shared input` multiplier: the upload is simply the sum of the files you dropped. That is still hundreds of megabytes per frame, and the upload — not the processing — is the whole wall clock. The app states the number before the button can be pressed.
 
 ## What you are building
 

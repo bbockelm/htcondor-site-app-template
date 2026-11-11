@@ -85,7 +85,6 @@ export const JOB_ATTRS = [
   // has to live on the job or the list cannot say which image is which
   // after a reload.
   'FitsTitle',
-  'FitsPreview',
 ] as const satisfies readonly string[];
 
 /** A job as the API returns it: a ClassAd, so the fields are loose. */
@@ -101,7 +100,6 @@ export interface Job {
   HoldReasonCode?: number;
   ExitCode?: number;
   FitsTitle?: string;
-  FitsPreview?: string;
   [attr: string]: unknown;
 }
 

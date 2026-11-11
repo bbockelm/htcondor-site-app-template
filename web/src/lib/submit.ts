@@ -30,7 +30,7 @@
 //     decide from results.json whether a picture exists, never from
 //     whether the file does. See Results.tsx.
 
-import { PREVIEW_FILE, RUNNER_FILE, OUTPUT_FILES } from './runner';
+import { RUNNER_FILE, OUTPUT_FILES } from './runner';
 import { isSafeFileName, requestDiskKB, requestMemoryMB } from './fits';
 
 /** Every job this app submits carries a batch name starting with this. */
@@ -132,7 +132,6 @@ export function buildSubmitFile(spec: JobSpec): string {
     // and read back through the projection in api.ts. If an access
     // point were to strip them the list falls back to the job id.
     `+FitsTitle = ${quote(adString(spec.title))}`,
-    `+FitsPreview = ${quote(adString(PREVIEW_FILE))}`,
     ``,
     `queue 1`,
     ``,
