@@ -10,7 +10,11 @@ import { defineConfig, devices } from '@playwright/test';
 //
 // scripts/e2e.sh starts the server and sets PLAYWRIGHT_BASE_URL.
 export default defineConfig({
-  testDir: './e2e',
+  // ../e2e: the specs stay at the repository root, where they are easy
+  // to find, but this config lives beside web/node_modules. Playwright
+  // resolves @playwright/test from the CONFIG's directory, so a config
+  // at the root could not find its own dependency.
+  testDir: '../e2e',
   timeout: 60_000,
   expect: { timeout: 15_000 },
   forbidOnly: !!process.env.CI,
@@ -18,6 +22,10 @@ export default defineConfig({
   workers: 1,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {
+    // localhost, and the container is run with -h localhost to match.
+    // Logging in is a real OAuth round trip and the server builds the
+    // IdP's address from its own hostname, so the name the browser
+    // starts on has to be the name the redirect comes back to.
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'https://localhost:8443',
     // Demo mode generates its own CA at startup, so nothing trusts the
     // certificate. Serving plain HTTP instead would be worse: the

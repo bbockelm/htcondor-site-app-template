@@ -7,8 +7,11 @@ APP ?= $(notdir $(CURDIR))
 
 # The API server to proxy to in development, and to test against.
 API ?= https://localhost:8443
-# Image used by `make e2e`. Pin a release tag in your own repo.
+# Images used by `make e2e`. Two, because demo mode runs a personal
+# HTCondor and the published API image carries only the Go binary --
+# see the header of scripts/e2e.sh. Pin release tags in your own repo.
 API_IMAGE ?= ghcr.io/bbockelm/golang-htcondor:latest
+POOL_IMAGE ?= htcondor/mini:latest
 # Where demo mode writes its generated passwords, inside the container.
 DEMO_CREDS ?= /tmp/htcondor-demo-credentials.json
 
@@ -65,7 +68,8 @@ bundle: build ## Package dist/$(APP).zip and dist/$(APP).zip.sha256
 	@cat dist/$(APP).zip.sha256
 	@echo
 	@echo "  Deploy:  scp dist/$(APP).zip dist/$(APP).zip.sha256 AP:/etc/condor/webapps/"
-	@echo "  Then the operator writes /etc/condor/webapps/$(APP).yaml once."
+	@echo "  Then the operator names the groups that may see it, once, in the"
+	@echo "  access point's configuration: HTTP_API_SITE_APP_$(shell printf '%s' "$(APP)" | tr 'a-z-' 'A-Z_')_GROUPS"
 
 e2e: install bundle ## Playwright against a demo API server in Docker
 	./scripts/e2e.sh

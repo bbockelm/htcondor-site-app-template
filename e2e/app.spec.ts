@@ -62,6 +62,18 @@ test('an API failure is reported in words, not swallowed', async ({ page }) => {
   );
 
   await page.goto(APP_URL);
+
+  // A file first. Every pipeline refuses to plan an empty submission,
+  // and that refusal is a client-side message that never reaches the
+  // API -- so without this the route below is never hit and the test
+  // passes or fails on the wrong error entirely.
+  await page.getByTestId('file-input').setInputFiles({
+    name: 'sample.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('hello from the e2e suite\n'),
+  });
+  await expect(page.getByTestId('file-list')).toContainText('sample.txt');
+
   await page.getByTestId('submit').click();
 
   // The server's own message, not a generic "something went wrong":

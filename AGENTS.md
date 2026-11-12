@@ -7,13 +7,13 @@ Read this before writing code. Most of what follows is not guessable from the so
 **How to use this file.** The rules below are mostly scar tissue — each one is a mistake somebody already made, with the reason it was not obvious. When you hit a problem this file does not name, the shape of an answer is usually one of:
 
 - **Ask the server before you guess.** Read `openapi.json` at the repo root *first*, before `api.ts` — the client here is a convenience wrapper over a much larger API, and the routes it does not wrap are the ones you will need. More than one app has shipped a worse design because its author never looked.
-- **Go and read the examples.** Three complete apps, each a branch you can diff against this one:
+- **Go and read the pipelines.** Three worked examples live in `web/src/pipelines/`, behind the picker in the running app:
 
-  ```bash
-  git diff main..example/blast -- web/src
-  ```
+  - `wordfreq` — start here. One file in, one job, a sortable table from the job's `results.json`, and an awk program generated in the browser so no user text reaches the submit file.
+  - `astro` — binary results. A rendered PNG comes back and the page shows it by URL rather than reading its bytes.
+  - `blast` — **the DAG trick**: one large shared input, uploaded once instead of once per job.
 
-  `example/word-frequency` (per-file jobs, a sortable results table), `example/blast` (one large shared input across many jobs, with the cost shown before the button), `example/astro-fits` (binary results — a rendered image — and a generated Python job).
+  `web/src/pipelines/types.ts` is the whole interface, and it is short. Read it before designing anything.
 
 If you solve something this file does not cover, add it here. The next person is in your position with less time.
 
@@ -64,7 +64,7 @@ What follows from that:
 
   Two constraints that shape the design: the spool is **one flat directory**, so every file is referenced by basename and two inputs cannot share a name; and **nothing can be added after submission**, so everything the workflow will ever need goes up in that one upload.
 
-  The catch today: **there is no REST route for submitting a DAG.** `submit_dag` exists as an MCP tool, and `GET /jobs/{id}/dag` reads a submitted workflow's structure back, but a site app cannot submit one. If your app needs this shape, say so — it is the strongest argument for adding the endpoint.
+  **`POST /api/v1/jobs/dag` submits one**, and it takes everything in a single multipart request: the `.dag`, the node submit files, and the shared input together. That is not a convenience — a workflow's spool is written once, and a file missing from the manager job's `transfer_input_files` is *skipped* at spool time rather than rejected, so a submit-then-upload shape would be accepted and silently drop your database. `api.submitDag` in `web/src/lib/api.ts` does this; `web/src/pipelines/blast` is a worked example.
 
 - **A URL in `transfer_input_files` would fix this** — the execute node fetches it, once per node rather than once per job, and a site cache can dedupe it entirely. The submit file is passed through verbatim, so you *can* emit one. But nothing here tells you whether this pool's execute nodes have a working transfer plugin for your scheme, and there is no API that reports it. A control that either works or holds every job with a transfer error, with no way to check first, is worse than the upload. **Ask your access point's operator**, and only then.
 
@@ -79,7 +79,7 @@ These are properties of the server, not preferences. Violating one produces a pa
 - **`Content-Security-Policy: default-src 'self'`.** No CDN scripts, no Google Fonts, no external images, no `eval`. Vendor everything into `web/src/`. A dependency that injects a remote script at runtime will not work.
 - **Build with a relative base.** `base: './'` in `web/vite.config.ts`. Never hardcode `/site/<id>/`: the app's id is the bundle's file name, which the operator chooses and may change to stage a new version.
 - **Read `window.__HTCONDOR_APP__.base` for routing**, via `web/src/lib/htcondor.ts`. Do not infer the mount point from `location.pathname` — it is wrong exactly when the user reloads on a sub-route.
-- **`app.yaml` must not contain a `groups` key.** Who may see this app is the operator's decision, recorded in a separate file next to the deployed bundle. A `groups` key in the bundle is ignored, and writing one suggests otherwise to the next reader.
+- **`app.yaml` must not contain a `groups` key.** Who may see this app is the operator's decision, made in the access point's configuration (`HTTP_API_SITE_APP_<ID>_GROUPS`). A bundle that names groups is refused outright, because the app's author has no idea which groups exist at a given site and their natural placeholder is "everyone".
 - **Nothing in this repository is secret.** The bundle is static files served to every member of its groups. An API key, a password or a token committed here is disclosed to all of them. If the app needs a credential, it belongs in the job, obtained through the credential endpoints — not in the bundle.
 
 ## Who uses this
@@ -101,7 +101,7 @@ make bundle   # the deliverable: dist/<app>.zip plus its sha256
 
 `make check` is what CI runs first, so a failure here is a failure there.
 
-Changes to `web/src/lib/submit.ts` always need `make e2e`. The unit tests check the submit file's text; only a real schedd tells you whether it is a submit file it will accept.
+Changes to `web/src/lib/submit.ts` or to any pipeline's submit builder always need `make e2e`. The unit tests check the submit file's text; only a real schedd tells you whether it is a submit file it will accept.
 
 **Do not add a dependency without saying why in the commit message.** Every one of them ships to users inside the bundle and has to satisfy the CSP.
 
@@ -112,10 +112,11 @@ app.yaml              name and description. No groups, no id.
 Makefile              make help
 web/src/lib/htcondor.ts   where am I, who is looking (platform integration)
 web/src/lib/api.ts        typed API client — extend this, don't bypass it
-web/src/lib/submit.ts     builds the submit file; THIS is your science
-web/src/app.tsx           the demo flow, meant to be replaced
+web/src/pipelines/        THIS is your science: one directory per pipeline
+web/src/lib/submit.ts     escaping, naming, sizing — shared by all of them
+web/src/app.tsx           the shell: identity, dropzone, submit, job list
 e2e/                      playwright against a real server
 scripts/e2e.sh            starts the server, deploys the bundle, runs the suite
 ```
 
-`web/src/lib/submit.ts` is the file that is actually about this lab's work. The quoting helpers in it are not decoration: `$` in a submit file is a macro substitution, and `$ENV(...)` reads the *server's* environment, so a file name a user typed must be escaped before it goes anywhere near a submit command.
+`web/src/pipelines/<name>/` is what is actually about this lab's work; `web/src/lib/submit.ts` is the shared half every pipeline builds on, and a mistake there is a security bug rather than a job that does not start. The quoting helpers in it are not decoration: `$` in a submit file is a macro substitution, and `$ENV(...)` reads the *server's* environment, so a file name a user typed must be escaped before it goes anywhere near a submit command.

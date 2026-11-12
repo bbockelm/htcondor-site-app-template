@@ -4,6 +4,14 @@ interface Props {
   files: File[];
   onChange: (files: File[]) => void;
   disabled?: boolean;
+  /** `accept` for the file input, e.g. '.fits,.fit'. */
+  accept?: string;
+  /**
+   * Whether more than one file is meaningful. A pipeline that takes
+   * exactly one keeps only the last dropped, rather than silently
+   * submitting the first of several.
+   */
+  multiple?: boolean;
 }
 
 /**
@@ -13,14 +21,23 @@ interface Props {
  * cannot be reached from the keyboard is unusable for some people and
  * merely annoying on a laptop trackpad for everyone else.
  */
-export function Dropzone({ files, onChange, disabled }: Props) {
+export function Dropzone({ files, onChange, disabled, accept, multiple = true }: Props) {
   const [over, setOver] = useState(false);
   const input = useRef<HTMLInputElement>(null);
 
   function add(incoming: FileList | null) {
     if (!incoming) return;
+    const dropped = Array.from(incoming);
+    // A pipeline that takes exactly one file keeps the last dropped.
+    // Accumulating would leave an earlier file selected and submit
+    // that one, which looks like the drop did nothing.
+    if (!multiple) {
+      const last = dropped[dropped.length - 1];
+      onChange(last ? [last] : []);
+      return;
+    }
     const byName = new Map(files.map((f) => [f.name, f]));
-    for (const f of Array.from(incoming)) byName.set(f.name, f);
+    for (const f of dropped) byName.set(f.name, f);
     onChange(Array.from(byName.values()));
   }
 
@@ -54,7 +71,8 @@ export function Dropzone({ files, onChange, disabled }: Props) {
         <input
           ref={input}
           type="file"
-          multiple
+          accept={accept}
+          multiple={multiple}
           data-testid="file-input"
           onChange={(e) => {
             add(e.target.files);
