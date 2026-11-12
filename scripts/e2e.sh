@@ -53,7 +53,14 @@ docker rm -f "$cid" >/dev/null
 chmod +x "$BINDIR/htcondor-api"
 
 echo "==> starting $POOL_IMAGE with it"
-docker run -d --name "$NAME" -p "${PORT}:8443" \
+# -h localhost is load-bearing. Logging in is a real OAuth round trip,
+# and the server builds the IdP's address from its OWN hostname -- which
+# in a container is a random id nothing outside it can resolve. Without
+# this the browser follows the redirect to that name and fails with
+# ERR_NAME_NOT_RESOLVED, reported against the page.goto that started the
+# flow rather than against the redirect, which sends you looking in the
+# wrong place entirely.
+docker run -d --name "$NAME" -h localhost -p "${PORT}:8443" \
   -v "$BINDIR/htcondor-api:/usr/local/bin/htcondor-api:ro" \
   --entrypoint /usr/local/bin/htcondor-api \
   "$POOL_IMAGE" \
@@ -101,5 +108,5 @@ YAML
 echo "==> running playwright"
 DEMO_CREDENTIALS_FILE="$PWD/.e2e/credentials.json" \
 APP_ID="$APP" \
-PLAYWRIGHT_BASE_URL="https://127.0.0.1:${PORT}" \
+PLAYWRIGHT_BASE_URL="https://localhost:${PORT}" \
   npx --prefix web playwright test --config "$PWD/web/playwright.config.ts"

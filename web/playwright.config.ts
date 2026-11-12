@@ -22,14 +22,11 @@ export default defineConfig({
   workers: 1,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {
-    // 127.0.0.1, not localhost. curl resolves the name fine -- the
-    // harness's own health check uses it -- but Chromium resolves
-    // through its own async resolver, which does not always consult
-    // /etc/hosts, and the suite fails with ERR_NAME_NOT_RESOLVED before
-    // it reaches a single assertion. An address cannot fail to resolve.
-    // The certificate names localhost rather than this, which costs
-    // nothing: it is self-signed by demo mode and already untrusted.
-    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'https://127.0.0.1:8443',
+    // localhost, and the container is run with -h localhost to match.
+    // Logging in is a real OAuth round trip and the server builds the
+    // IdP's address from its own hostname, so the name the browser
+    // starts on has to be the name the redirect comes back to.
+    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'https://localhost:8443',
     // Demo mode generates its own CA at startup, so nothing trusts the
     // certificate. Serving plain HTTP instead would be worse: the
     // session cookie is set Secure, and without it every authenticated
