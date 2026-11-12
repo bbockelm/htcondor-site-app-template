@@ -15,12 +15,23 @@
 // needs and do not want to upload it per job.
 
 import type { Pipeline } from './types';
+import { astro } from './astro';
+import { blast } from './blast';
 import { wordFrequency } from './wordfreq';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- each
-// pipeline keeps its own options type; the shell holds them opaquely.
-export const PIPELINES: Pipeline<any>[] = [wordFrequency];
+/**
+ * A pipeline whose options type is its own business.
+ *
+ * Each pipeline parameterises Pipeline<O> with whatever it keeps, and
+ * the shell holds that value without looking inside. A list of
+ * different ones cannot be typed without an escape hatch, so it is
+ * taken once, here, rather than at every use.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type AnyPipeline = Pipeline<any>;
 
-export function pipelineById(id: string): Pipeline<any> | undefined {
+export const PIPELINES: AnyPipeline[] = [wordFrequency, astro, blast];
+
+export function pipelineById(id: string): AnyPipeline | undefined {
   return PIPELINES.find((p) => p.id === id);
 }

@@ -21,8 +21,8 @@ You get the queue, the submit path, file transfer, job output and the rest of th
 
 1. **Use this template**, then clone your copy.
 2. Edit `app.yaml` — the name and description your users see.
-3. Edit `web/src/lib/submit.ts` — this is the file that is about your science. Everything else is scaffolding.
-4. Edit `web/src/app.tsx` — the controls. Fewer is better; see `AGENTS.md`.
+3. Copy `web/src/pipelines/wordfreq/` to a directory of your own — this is the part that is about your science. Everything else is scaffolding.
+4. Add it to `web/src/pipelines/index.ts`, and delete the pipelines you do not want.
 5. `make check`, then `make bundle`.
 
 Point the dev server at a real API server:
@@ -59,19 +59,17 @@ The server notices the new file and reloads it. There is no restart.
 
 ## Worked examples
 
-Two complete apps, each on its own branch. They are not extra folders to wade through: `main` stays the one thing "Use this template" gives you, and each example is a branch you can **diff against it** to see exactly what building an app involves.
+Three of them, in the app itself, behind the pipeline picker. Pick one in the running demo to see it; read `web/src/pipelines/<name>/` to see how it is built.
 
-| Branch | What it does | Worth reading for |
+| Pipeline | What it does | Worth reading for |
 | --- | --- | --- |
-| [`example/word-frequency`](../../tree/example/word-frequency) | Counts word frequencies in dropped text files, one job per file | A sortable results table drawn from the job's `results.json`, and an awk program generated in the browser so no user text ever reaches the submit file |
-| [`example/blast`](../../tree/example/blast) | Searches many query files against one uploaded reference database | What to do when a large input is shared by many jobs — including telling the user what their submission will cost before they press the button |
-| [`example/astro-fits`](../../tree/example/astro-fits) | Statistics and rendered previews from Hubble FITS images, with astropy | Getting a **binary** result — a picture — back to the page, and a job whose program is generated and uploaded rather than inlined |
+| `pipelines/wordfreq` | Counts word frequencies in a dropped text file | **Start here.** The whole arc with nothing science-specific in the way — and an awk program generated in the browser, so no user text ever reaches the submit file |
+| `pipelines/astro` | Statistics and rendered previews from FITS images, with astropy | Getting a **binary** result — a picture — back to the page, and a job whose program is generated and uploaded rather than inlined |
+| `pipelines/blast` | Searches many query files against one database | **The DAG trick.** A large shared input uploaded *once* instead of once per job |
 
-```bash
-git diff main..example/blast -- web/src
-```
+A pipeline is four things: what files it takes, what controls it offers, what submit file it produces, and how its results read. The interface is in `web/src/pipelines/types.ts` and it is about sixty lines. Everything else — identity, the dropzone, submit-then-upload-then-poll, the job list — is the shell, and you do not have to touch it.
 
-All three were written from this repository alone, by someone with no other context, which is also how most of its sharper edges were found. Each is pinned to the template as it stood when it was written, so expect small drift from `main`.
+Building your own is adding a directory and one line in `web/src/pipelines/index.ts`. Deleting the ones you do not want is deleting their line.
 
 ## What not to do
 
@@ -79,7 +77,7 @@ The short version of `AGENTS.md`, which you should read before writing code:
 
 - No CDN scripts, fonts or images. The server sends `default-src 'self'` and will block them.
 - Never hardcode `/site/myapp/`. Read `window.__HTCONDOR_APP__.base`.
-- No `groups` in `app.yaml`. No secrets anywhere in the bundle — it is public to everyone in its groups.
+- No `groups` in `app.yaml` — who may see the app is set in the access point's configuration. No secrets anywhere in the bundle; it is public to everyone in its groups.
 - Do not invent API endpoints. Check `/openapi.json` on a running server.
 
 ## Layout
@@ -87,9 +85,10 @@ The short version of `AGENTS.md`, which you should read before writing code:
 | Path | What it is |
 |---|---|
 | `app.yaml` | Name and description. Not groups, not id. |
-| `web/src/lib/submit.ts` | Builds the submit file. **Your science lives here.** |
+| `web/src/pipelines/` | **Your science lives here.** One directory per pipeline, plus the interface they implement. |
+| `web/src/lib/submit.ts` | Escaping, naming and sizing, shared by every pipeline. A mistake here is a security bug. |
 | `web/src/lib/api.ts` | Typed API client. Extend it rather than calling `fetch` directly. |
 | `web/src/lib/htcondor.ts` | Mount point and identity, from the server. |
-| `web/src/app.tsx` | The demo flow. Replace it. |
+| `web/src/app.tsx` | The shell: identity, dropzone, submit, job list. Usually left alone. |
 | `e2e/` | Playwright, against a real server. |
 | `AGENTS.md` | Read before writing code, by a person or an assistant. |
