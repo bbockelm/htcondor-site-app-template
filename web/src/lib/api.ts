@@ -110,6 +110,32 @@ export interface InputFile {
   executable?: boolean;
 }
 
+/**
+ * A GET whose body is text, not JSON -- job output, a result file.
+ *
+ * Separate from `request` because the error path differs: a failure
+ * still answers JSON, so the detail has to be dug out of a body this
+ * function is otherwise not parsing.
+ */
+async function requestText(path: string): Promise<string> {
+  const res = await fetch(`${BASE}${path}`, { credentials: 'include' });
+  if (res.status === 401) {
+    redirectToLogin();
+    throw new ApiError(401, 'Session expired');
+  }
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const body = (await res.json()) as { message?: string; error?: string };
+      detail = body.message ?? body.error ?? detail;
+    } catch {
+      /* not JSON; statusText is the best we have */
+    }
+    throw new ApiError(res.status, detail);
+  }
+  return res.text();
+}
+
 export const api = {
   /** Who is logged in. Resolves the session cookie only. */
   me: () => request<Identity>('/auth/me'),
@@ -202,6 +228,80 @@ export const api = {
   /** Release a held job so it can run again. */
   release: (jobId: string) =>
     request<void>(`/jobs/${encodeURIComponent(jobId)}/release`, { method: 'POST' }),
+
+  /**
+   * Submit a DAG workflow, with everything it needs, in ONE request.
+   *
+   * Not submit-then-upload like a plain job, and this is not a style
+   * choice. A workflow's spool is written once -- the transfer
+   * completing is what releases the hold, and the schedd refuses a
+   * second spool for the same job -- so a sandbox that is not complete
+   * at submit time never will be. Worse, the manager job's
+   * transfer_input_files is computed from the DAG at submit time, and a
+   * file not in that list is SKIPPED rather than rejected: a two-step
+   * upload would be accepted and silently dropped.
+   *
+   * Sent as multipart because that is the only shape a large binary
+   * shared input can arrive in. This is what makes "upload the 2 GB
+   * database once, not once per job" possible at all.
+   */
+  submitDag: async (req: {
+    dag: string;
+    files?: Record<string, string>;
+    uploads?: { name: string; file: File }[];
+    dagName?: string;
+    batchName?: string;
+    maxJobs?: number;
+  }): Promise<{ job_id: string; cluster_id: number; input_files: string[] }> => {
+    const form = new FormData();
+    form.set('dag', req.dag);
+    if (req.dagName) form.set('dag_name', req.dagName);
+    if (req.batchName) form.set('batch_name', req.batchName);
+    if (req.maxJobs) form.set('max_jobs', String(req.maxJobs));
+    // Text files the DAG references -- node submit files, scripts.
+    for (const [name, body] of Object.entries(req.files ?? {})) {
+      form.append(name, new Blob([body], { type: 'text/plain' }), name);
+    }
+    // Binary or large files, streamed rather than stringified.
+    for (const u of req.uploads ?? []) {
+      form.append(u.name, u.file, u.name);
+    }
+    const res = await fetch(`${BASE}/jobs/dag`, {
+      method: 'POST',
+      credentials: 'include',
+      // No Content-Type: the browser sets it, with the boundary.
+      body: form,
+    });
+    if (res.status === 401) {
+      redirectToLogin();
+      throw new ApiError(401, 'Session expired');
+    }
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const body = (await res.json()) as { message?: string; error?: string };
+        detail = body.message ?? body.error ?? detail;
+      } catch {
+        /* not JSON; statusText is the best we have */
+      }
+      throw new ApiError(res.status, detail);
+    }
+    return (await res.json()) as { job_id: string; cluster_id: number; input_files: string[] };
+  },
+
+  /** The job's standard output, as text. This is the readable report. */
+  stdout: (jobId: string) => requestText(`/jobs/${encodeURIComponent(jobId)}/stdout`),
+
+  /** The job's standard error, as text. Only read when something failed. */
+  stderr: (jobId: string) => requestText(`/jobs/${encodeURIComponent(jobId)}/stderr`),
+
+  /** One named file from the job's output sandbox, as text. */
+  jobFile: (jobId: string, name: string) =>
+    requestText(`/jobs/${encodeURIComponent(jobId)}/files/${encodeURIComponent(name)}`),
+
+  /** URL for one named file from the job's sandbox. Use as an href. */
+  fileUrl: (jobId: string, name: string) =>
+    `${BASE}/jobs/${encodeURIComponent(jobId)}/files/${encodeURIComponent(name)}`,
 
   /** URL for the job's output sandbox as a tar. Use as an href. */
   outputUrl: (jobId: string) => `${BASE}/jobs/${encodeURIComponent(jobId)}/output`,
