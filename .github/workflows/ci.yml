@@ -58,5 +58,12 @@ jobs:
         if: failure()
         with:
           name: playwright-report
-          path: playwright-report/
+          # web/, not the root: the Playwright config lives beside
+          # web/node_modules so it can resolve @playwright/test, and
+          # the report and traces land next to the config. Uploading
+          # the root path captured nothing, which is how a failing run
+          # came with no screenshot to look at.
+          path: |
+            web/playwright-report/
+            web/test-results/
           retention-days: 7
