@@ -20,8 +20,18 @@ set -euo pipefail
 
 APP="${APP:-$(basename "$PWD")}"
 # Where the API binary comes from, and where the pool comes from.
+# The BLAST pipeline is a DAG, and a demo pool only runs one if the
+# server passes CONDOR_CONFIG down to the manager job and turns off
+# DAGMan's refusal to keep a node log under /tmp. Both landed in the
+# server together; against an image older than that, the workflow
+# aborts in its first second and only that one spec fails.
 API_IMAGE="${API_IMAGE:-ghcr.io/bbockelm/golang-htcondor:latest}"
 POOL_IMAGE="${POOL_IMAGE:-htcondor/mini:latest}"
+# The SAME port inside the container and out, which is not fussiness.
+# Logging in is a real OAuth round trip and the server builds the IdP's
+# address from its own listening address, so a container listening on
+# 8443 behind a host port of 8843 sends the browser to 8443 -- where it
+# reaches whatever else is there, or nothing.
 PORT="${API_PORT:-8443}"
 DEMO_CREDS="${DEMO_CREDS:-/tmp/htcondor-demo-credentials.json}"
 # Under /tmp because the server no longer runs as root (see --user below)
@@ -83,14 +93,14 @@ APP_MACRO="$(printf '%s' "$APP" | tr 'a-z-' 'A-Z_')"
 # change uid unless it is root, so it takes the submitter's word and runs
 # everything as the invoking account. All three identities submit, spool
 # and run.
-docker run -d --name "$NAME" -h localhost -p "${PORT}:8443" --user condor \
+docker run -d --name "$NAME" -h localhost -p "${PORT}:${PORT}" --user condor \
   -v "$BINDIR/htcondor-api:/usr/local/bin/htcondor-api:ro" \
   -e "_CONDOR_HTTP_API_SITE_APPS_DIR=$APPS_DIR" \
   -e "_CONDOR_HTTP_API_SITE_APPS_RELOAD_INTERVAL=2s" \
   -e "_CONDOR_HTTP_API_SITE_APP_${APP_MACRO}_GROUPS=*" \
   --entrypoint /usr/local/bin/htcondor-api \
   "$POOL_IMAGE" \
-  --demo --listen :8443 --demo-credentials-file "$DEMO_CREDS" >/dev/null
+  --demo --listen ":${PORT}" --demo-credentials-file "$DEMO_CREDS" >/dev/null
 
 echo "==> waiting for the server"
 for _ in $(seq 1 90); do
