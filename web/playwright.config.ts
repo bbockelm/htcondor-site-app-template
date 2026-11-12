@@ -10,7 +10,11 @@ import { defineConfig, devices } from '@playwright/test';
 //
 // scripts/e2e.sh starts the server and sets PLAYWRIGHT_BASE_URL.
 export default defineConfig({
-  testDir: './e2e',
+  // ../e2e: the specs stay at the repository root, where they are easy
+  // to find, but this config lives beside web/node_modules. Playwright
+  // resolves @playwright/test from the CONFIG's directory, so a config
+  // at the root could not find its own dependency.
+  testDir: '../e2e',
   timeout: 60_000,
   expect: { timeout: 15_000 },
   forbidOnly: !!process.env.CI,

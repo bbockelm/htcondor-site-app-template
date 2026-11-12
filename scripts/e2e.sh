@@ -1,21 +1,36 @@
 #!/usr/bin/env bash
 # Run the end-to-end suite against a real htcondor-api in demo mode.
 #
-# Starts the published container, deploys the bundle this repo just
-# built into it, reads the generated passwords out of the demo
-# credentials file, and runs Playwright.
+# Deploys the bundle this repo just built, reads the generated passwords
+# out of the demo credentials file, and runs Playwright.
 #
 # Used by `make e2e` and by CI, so the two cannot drift.
+#
+# TWO IMAGES, and the reason is not obvious. Demo mode runs a personal
+# HTCondor, so it needs condor_master -- and the published API image is
+# a minimal one carrying only the Go binary. Running it with --demo
+# fails with "condor_master not found in PATH".
+#
+# So the pool comes from upstream's minicondor image, and the API binary
+# is lifted out of the release image and mounted into it. The binary is
+# statically linked, so it runs there even though the two images are
+# built on different distributions. That beats publishing a second
+# multi-gigabyte image whose only job is to hold both halves.
 set -euo pipefail
 
 APP="${APP:-$(basename "$PWD")}"
-IMAGE="${API_IMAGE:-ghcr.io/bbockelm/golang-htcondor:latest}"
+# Where the API binary comes from, and where the pool comes from.
+API_IMAGE="${API_IMAGE:-ghcr.io/bbockelm/golang-htcondor:latest}"
+POOL_IMAGE="${POOL_IMAGE:-htcondor/mini:latest}"
 PORT="${API_PORT:-8443}"
 DEMO_CREDS="${DEMO_CREDS:-/tmp/htcondor-demo-credentials.json}"
 APPS_DIR="${APPS_DIR:-/etc/condor/webapps}"
 NAME="htcondor-api-e2e-$$"
 
 cleanup() {
+  # One trap, one function. A second `trap ... EXIT` would REPLACE this
+  # one rather than add to it, and the container would be left running.
+  [ -z "${BINDIR:-}" ] || rm -rf "$BINDIR"
   if [ -n "${KEEP_CONTAINER:-}" ]; then
     echo "==> leaving $NAME running (KEEP_CONTAINER set)"
     return
@@ -26,8 +41,22 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "==> starting $IMAGE"
-docker run -d --name "$NAME" -p "${PORT}:8443" "$IMAGE" \
+# Lift the binary out of the API image. `docker create` makes a
+# container without running it, which is the documented way to copy a
+# file out of an image that has no shell -- and this one has barely
+# anything else either.
+echo "==> taking htcondor-api out of $API_IMAGE"
+BINDIR="$(mktemp -d)"
+cid="$(docker create "$API_IMAGE")"
+docker cp "$cid:/usr/local/bin/htcondor-api" "$BINDIR/htcondor-api" >/dev/null
+docker rm -f "$cid" >/dev/null
+chmod +x "$BINDIR/htcondor-api"
+
+echo "==> starting $POOL_IMAGE with it"
+docker run -d --name "$NAME" -p "${PORT}:8443" \
+  -v "$BINDIR/htcondor-api:/usr/local/bin/htcondor-api:ro" \
+  --entrypoint /usr/local/bin/htcondor-api \
+  "$POOL_IMAGE" \
   --demo --listen :8443 --demo-credentials-file "$DEMO_CREDS" >/dev/null
 
 echo "==> waiting for the server"
@@ -73,4 +102,4 @@ echo "==> running playwright"
 DEMO_CREDENTIALS_FILE="$PWD/.e2e/credentials.json" \
 APP_ID="$APP" \
 PLAYWRIGHT_BASE_URL="https://localhost:${PORT}" \
-  npx --prefix web playwright test --config "$PWD/playwright.config.ts"
+  npx --prefix web playwright test --config "$PWD/web/playwright.config.ts"
