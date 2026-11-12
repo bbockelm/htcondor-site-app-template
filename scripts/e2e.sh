@@ -60,8 +60,17 @@ echo "==> starting $POOL_IMAGE with it"
 # ERR_NAME_NOT_RESOLVED, reported against the page.goto that started the
 # flow rather than against the redirect, which sends you looking in the
 # wrong place entirely.
+# The id as it appears in a configuration parameter name: upper-cased,
+# hyphens to underscores. HTCondor parameter names are case-insensitive
+# and a hyphen in one reads as subtraction, so the server derives the
+# same spelling from the bundle's file name.
+APP_MACRO="$(printf '%s' "$APP" | tr 'a-z-' 'A-Z_')"
+
 docker run -d --name "$NAME" -h localhost -p "${PORT}:8443" \
   -v "$BINDIR/htcondor-api:/usr/local/bin/htcondor-api:ro" \
+  -e "_CONDOR_HTTP_API_SITE_APPS_DIR=$APPS_DIR" \
+  -e "_CONDOR_HTTP_API_SITE_APPS_RELOAD_INTERVAL=2s" \
+  -e "_CONDOR_HTTP_API_SITE_APP_${APP_MACRO}_GROUPS=*" \
   --entrypoint /usr/local/bin/htcondor-api \
   "$POOL_IMAGE" \
   --demo --listen :8443 --demo-credentials-file "$DEMO_CREDS" >/dev/null
@@ -94,6 +103,22 @@ echo "==> deploying dist/${APP}.zip"
 docker exec "$NAME" mkdir -p "$APPS_DIR"
 docker cp "dist/${APP}.zip" "$NAME:${APPS_DIR}/${APP}.zip"
 docker cp "dist/${APP}.zip.sha256" "$NAME:${APPS_DIR}/${APP}.zip.sha256"
+
+# The server rescans on an interval, so the bundle is not served the
+# instant it lands. Wait for it rather than letting the suite race the
+# scan -- a spec that starts too early fails on an undefined
+# window.__HTCONDOR_APP__, which reads like the injection is broken.
+echo "==> waiting for /site/${APP}/ to be published"
+for _ in $(seq 1 30); do
+  if curl -ksf "https://localhost:${PORT}/site/${APP}/" >/dev/null 2>&1; then break; fi
+  sleep 2
+done
+curl -ksf "https://localhost:${PORT}/site/${APP}/" >/dev/null || {
+  echo "the app never appeared under /site/${APP}/" >&2
+  echo "the server is told where bundles live and who may see them by the" >&2
+  echo "_CONDOR_HTTP_API_SITE_APP* variables above; check them first." >&2
+  exit 1
+}
 
 # The policy file is the operator's, so the test writes one too -- the
 # bundle deliberately cannot name its own groups. Empty groups here
