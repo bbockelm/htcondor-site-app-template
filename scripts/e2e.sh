@@ -101,5 +101,5 @@ YAML
 echo "==> running playwright"
 DEMO_CREDENTIALS_FILE="$PWD/.e2e/credentials.json" \
 APP_ID="$APP" \
-PLAYWRIGHT_BASE_URL="https://localhost:${PORT}" \
+PLAYWRIGHT_BASE_URL="https://127.0.0.1:${PORT}" \
   npx --prefix web playwright test --config "$PWD/web/playwright.config.ts"
