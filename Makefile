@@ -68,7 +68,8 @@ bundle: build ## Package dist/$(APP).zip and dist/$(APP).zip.sha256
 	@cat dist/$(APP).zip.sha256
 	@echo
 	@echo "  Deploy:  scp dist/$(APP).zip dist/$(APP).zip.sha256 AP:/etc/condor/webapps/"
-	@echo "  Then the operator writes /etc/condor/webapps/$(APP).yaml once."
+	@echo "  Then the operator names the groups that may see it, once, in the"
+	@echo "  access point's configuration: HTTP_API_SITE_APP_$(shell printf '%s' "$(APP)" | tr 'a-z-' 'A-Z_')_GROUPS"
 
 e2e: install bundle ## Playwright against a demo API server in Docker
 	./scripts/e2e.sh

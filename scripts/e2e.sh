@@ -24,7 +24,9 @@ API_IMAGE="${API_IMAGE:-ghcr.io/bbockelm/golang-htcondor:latest}"
 POOL_IMAGE="${POOL_IMAGE:-htcondor/mini:latest}"
 PORT="${API_PORT:-8443}"
 DEMO_CREDS="${DEMO_CREDS:-/tmp/htcondor-demo-credentials.json}"
-APPS_DIR="${APPS_DIR:-/etc/condor/webapps}"
+# Under /tmp because the server no longer runs as root (see --user below)
+# and /etc/condor belongs to root in the pool image.
+APPS_DIR="${APPS_DIR:-/tmp/webapps}"
 NAME="htcondor-api-e2e-$$"
 
 cleanup() {
@@ -66,7 +68,22 @@ echo "==> starting $POOL_IMAGE with it"
 # same spelling from the bundle's file name.
 APP_MACRO="$(printf '%s' "$APP" | tr 'a-z-' 'A-Z_')"
 
-docker run -d --name "$NAME" -h localhost -p "${PORT}:8443" \
+# --user is the other load-bearing flag, and it is the one that makes
+# submitting work at all. As root, HTCondor can change uid, so the schedd
+# insists every submitter resolve to a real OS account and spools each
+# job's input as that account -- and the demo's identities (admin, user,
+# newbie) exist in no passwd file. Demo mode answers that with
+# AP_GENERIC_OS_USERS, which hands out ONE OS account per AP user from a
+# fixed list, so with three identities and one account only the first can
+# submit; and the spooling account cannot traverse the 0750 spool
+# directory anyway, which is the "(errno 13) Permission denied" the
+# upload used to fail with.
+#
+# A demo started by an ordinary user has none of that: HTCondor cannot
+# change uid unless it is root, so it takes the submitter's word and runs
+# everything as the invoking account. All three identities submit, spool
+# and run.
+docker run -d --name "$NAME" -h localhost -p "${PORT}:8443" --user condor \
   -v "$BINDIR/htcondor-api:/usr/local/bin/htcondor-api:ro" \
   -e "_CONDOR_HTTP_API_SITE_APPS_DIR=$APPS_DIR" \
   -e "_CONDOR_HTTP_API_SITE_APPS_RELOAD_INTERVAL=2s" \
@@ -119,16 +136,6 @@ curl -ksf "https://localhost:${PORT}/site/${APP}/" >/dev/null || {
   echo "_CONDOR_HTTP_API_SITE_APP* variables above; check them first." >&2
   exit 1
 }
-
-# The policy file is the operator's, so the test writes one too -- the
-# bundle deliberately cannot name its own groups. Empty groups here
-# means "every authenticated user", which is what a single-tenant demo
-# server wants.
-docker exec "$NAME" sh -c "cat > ${APPS_DIR}/${APP}.yaml" <<YAML
-groups: ["*"]
-home: false
-enabled: true
-YAML
 
 echo "==> running playwright"
 DEMO_CREDENTIALS_FILE="$PWD/.e2e/credentials.json" \
