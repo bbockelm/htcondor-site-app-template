@@ -10,7 +10,7 @@
 // a name that is wrong here is a node that fails at run time with a
 // missing input rather than a submission that is refused.
 
-import { buildSubmitFile, type JobSpec } from './blast';
+import { EXIT_NO_BLAST, buildSubmitFile, type JobSpec } from './blast';
 
 /** The file name the DAG itself is written as. */
 export const DAG_NAME = 'search.dag';
@@ -39,7 +39,7 @@ export interface Node {
 export function planNodes(
   queryNames: string[],
   queryBytes: number[],
-  base: Omit<JobSpec, 'queryNames' | 'queryBytes'>,
+  base: Omit<JobSpec, 'queryNames' | 'queryBytes' | 'node'>,
   perNode: number,
 ): Node[] {
   const nodes: Node[] = [];
@@ -47,23 +47,28 @@ export function planNodes(
     const names = queryNames.slice(i, i + perNode);
     const bytes = queryBytes.slice(i, i + perNode).reduce((a, b) => a + b, 0);
     const n = nodes.length;
+    const name = `q${n}`;
     nodes.push({
-      name: `q${n}`,
+      name,
       submitName: nodeSubmitName(n),
-      spec: { ...base, queryNames: names, queryBytes: bytes },
+      spec: { ...base, node: name, queryNames: names, queryBytes: bytes },
     });
   }
   return nodes;
 }
 
+
 /**
  * The .dag file.
  *
- * RETRY on every node, because the failures this workflow actually
- * sees are an evicted job and a node that was missing BLAST+ -- the
- * first is worth retrying and the second fails the same way twice,
- * quickly. No PARENT/CHILD lines: the nodes do not depend on each
- * other, and writing edges that do not exist would say they do.
+ * RETRY on every node, because the failure this workflow actually sees
+ * is an evicted job and that is worth another go. UNLESS-EXIT excuses
+ * the one failure that is not: a pool with no BLAST+ installed returns
+ * the same answer however many times it is asked, and retrying turns a
+ * twenty-second answer into a several-minute one.
+ *
+ * No PARENT/CHILD lines: the nodes do not depend on each other, and
+ * writing edges that do not exist would say they do.
  */
 export function buildDagFile(nodes: Node[]): string {
   const lines = [
@@ -80,7 +85,7 @@ export function buildDagFile(nodes: Node[]): string {
   }
   lines.push(``);
   for (const n of nodes) {
-    lines.push(`RETRY ${n.name} 2`);
+    lines.push(`RETRY ${n.name} 2 UNLESS-EXIT ${EXIT_NO_BLAST}`);
   }
   lines.push(``);
   return lines.join('\n');

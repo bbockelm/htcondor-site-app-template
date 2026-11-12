@@ -1,4 +1,5 @@
 import { useRef, useState, type DragEvent } from 'react';
+import { formatSize } from '../lib/format';
 
 interface Props {
   files: File[];
@@ -12,6 +13,15 @@ interface Props {
    * submitting the first of several.
    */
   multiple?: boolean;
+  /**
+   * Test ids for the hidden input and the file list.
+   *
+   * A pipeline with one slot keeps the unqualified ids, so a test can
+   * drive the default pipeline without knowing which one it is; a
+   * pipeline with several qualifies them by slot. See app.tsx.
+   */
+  inputTestId?: string;
+  listTestId?: string;
 }
 
 /**
@@ -21,7 +31,15 @@ interface Props {
  * cannot be reached from the keyboard is unusable for some people and
  * merely annoying on a laptop trackpad for everyone else.
  */
-export function Dropzone({ files, onChange, disabled, accept, multiple = true }: Props) {
+export function Dropzone({
+  files,
+  onChange,
+  disabled,
+  accept,
+  multiple = true,
+  inputTestId = 'file-input',
+  listTestId = 'file-list',
+}: Props) {
   const [over, setOver] = useState(false);
   const input = useRef<HTMLInputElement>(null);
 
@@ -73,7 +91,7 @@ export function Dropzone({ files, onChange, disabled, accept, multiple = true }:
           type="file"
           accept={accept}
           multiple={multiple}
-          data-testid="file-input"
+          data-testid={inputTestId}
           onChange={(e) => {
             add(e.target.files);
             e.target.value = '';
@@ -83,7 +101,7 @@ export function Dropzone({ files, onChange, disabled, accept, multiple = true }:
       </div>
 
       {files.length > 0 && (
-        <ul className="files" data-testid="file-list">
+        <ul className="files" data-testid={listTestId}>
           {files.map((f) => (
             <li key={f.name}>
               <span className="name">{f.name}</span>
@@ -104,14 +122,3 @@ export function Dropzone({ files, onChange, disabled, accept, multiple = true }:
   );
 }
 
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ['KB', 'MB', 'GB'];
-  let v = bytes / 1024;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  return `${v.toFixed(1)} ${units[i]}`;
-}

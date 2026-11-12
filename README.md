@@ -2,7 +2,7 @@
 
 A starting point for a custom job submission interface served by an HTCondor access point, to your group, at your site.
 
-Clone it with **Use this template** on GitHub. It already works: drop files, pick a pipeline, submit, watch the jobs run. Delete the parts you do not want rather than assembling the parts you do.
+Clone it with **Use this template** on GitHub. It already works: pick a pipeline, drop files — or tick the box to use example data — submit, watch the jobs run, and read the results in the page. Delete the parts you do not want rather than assembling the parts you do.
 
 ```
 make dev      # dev server on :5173, proxying to an API server
@@ -67,7 +67,7 @@ Three of them, in the app itself, behind the pipeline picker. Pick one in the ru
 | `pipelines/astro` | Statistics and rendered previews from FITS images, with astropy | Getting a **binary** result — a picture — back to the page, and a job whose program is generated and uploaded rather than inlined |
 | `pipelines/blast` | Searches many query files against one database | **The DAG trick.** A large shared input uploaded *once* instead of once per job |
 
-A pipeline is four things: what files it takes, what controls it offers, what submit file it produces, and how its results read. The interface is in `web/src/pipelines/types.ts` and it is about sixty lines. Everything else — identity, the dropzone, submit-then-upload-then-poll, the job list — is the shell, and you do not have to touch it.
+A pipeline is five things: what files it takes (one labelled slot per kind, so a reference database and a pile of queries are not one pile), what controls it offers, what submit file it produces, how its results read, and what to run for someone who has no data of their own. The interface is in `web/src/pipelines/types.ts`. Everything else — identity, the file pickers, submit-then-upload-then-poll, the job list, rendering the results under a finished job — is the shell, and you do not have to touch it.
 
 Building your own is adding a directory and one line in `web/src/pipelines/index.ts`. Deleting the ones you do not want is deleting their line.
 
@@ -89,6 +89,6 @@ The short version of `AGENTS.md`, which you should read before writing code:
 | `web/src/lib/submit.ts` | Escaping, naming and sizing, shared by every pipeline. A mistake here is a security bug. |
 | `web/src/lib/api.ts` | Typed API client. Extend it rather than calling `fetch` directly. |
 | `web/src/lib/htcondor.ts` | Mount point and identity, from the server. |
-| `web/src/app.tsx` | The shell: identity, dropzone, submit, job list. Usually left alone. |
+| `web/src/app.tsx` | The shell: identity, file pickers, submit, job list, results. Usually left alone. |
 | `e2e/` | Playwright, against a real server. |
 | `AGENTS.md` | Read before writing code, by a person or an assistant. |

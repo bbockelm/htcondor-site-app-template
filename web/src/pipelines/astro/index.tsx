@@ -10,7 +10,7 @@
 // to produce either N jobs or one. The shell submits one plan, so
 // "each" is a single submit file with `queue` over a list.
 
-import type { ControlsProps, Pipeline, PlanResult, ResultsProps } from '../types';
+import type { ControlsProps, FileSet, Pipeline, PlanResult, ResultsProps } from '../types';
 import {
   CHANNELS,
   CLIPS,
@@ -25,8 +25,9 @@ import {
   type Options,
 } from './fits';
 import { RUNNER_FILE, buildRunner, runnerConfig } from './runner';
-import { batchNameFor, buildSubmitFile } from './submit';
+import { BATCH_PREFIX, batchNameFor, buildSubmitFile } from './submit';
 import { Results as FitsResults } from './Results';
+import { buildExample } from './example';
 
 function Controls({ options, onChange, busy }: ControlsProps<Options>) {
   return (
@@ -90,7 +91,8 @@ function Controls({ options, onChange, busy }: ControlsProps<Options>) {
   );
 }
 
-function plan(files: File[], options: Options): PlanResult {
+function plan(fileSet: FileSet, options: Options): PlanResult {
+  const files = fileSet.images ?? [];
   if (files.length === 0) {
     return { kind: 'error', message: 'Drop one or more FITS images.' };
   }
@@ -141,14 +143,20 @@ function plan(files: File[], options: Options): PlanResult {
   }));
   const bytes = files.reduce((n, f) => n + f.size, 0);
   const title = options.mode === 'composite' ? `colour: ${names.join(' + ')}` : names.join(', ');
+  // ONCE. The name carries a timestamp, so calling it twice -- as an
+  // earlier version did, for the plan and for the submit file -- gives
+  // the job list one name and the job itself another whenever the two
+  // calls land either side of a second boundary. The job then exists
+  // and runs and never appears in the list.
+  const batchName = batchNameFor(options.mode);
 
   return {
     kind: 'job',
-    batchName: batchNameFor(options.mode),
+    batchName,
     submitFile: buildSubmitFile({
       inputNames: names,
       inputBytes: bytes,
-      batchName: batchNameFor(options.mode),
+      batchName,
       title,
     }),
     uploads: [
@@ -173,10 +181,22 @@ export const astro: Pipeline<Options> = {
   id: 'fitsprev',
   name: 'FITS previews',
   summary: 'Statistics and a viewable preview for astronomical images, or a colour composite.',
-  accept: '.fits,.fit,.FITS,.FIT',
-  multiple: true,
-  inputLabel: 'FITS images',
+  batchPrefix: BATCH_PREFIX,
+  inputs: [
+    {
+      id: 'images',
+      label: 'FITS images',
+      hint: 'One job per image, or exactly three for a colour composite.',
+      accept: '.fits,.fit,.FITS,.FIT',
+      multiple: true,
+    },
+  ],
   defaults: DEFAULT_OPTIONS,
+  example: {
+    label: 'Use three example frames instead',
+    note: 'A synthetic star field in three filters, generated here. Real FITS, made-up pixels — try the colour composite with them.',
+    build: buildExample,
+  },
   Controls,
   plan,
   Results,
