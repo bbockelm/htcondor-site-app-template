@@ -140,10 +140,64 @@ describe('a planner may be asynchronous', () => {
     expect(planned.kind).toBe('job');
   });
 
-  it('is still fine for the synchronous planners that ship here', () => {
-    for (const p of PIPELINES) {
+  it('is still fine for the planners that ship here that are synchronous', () => {
+    // BLAST is not one of them any more: it asks the pool whether it
+    // can run a container before it writes a submit file. The others
+    // read nothing and answer at once, and their tests stay simple
+    // for it -- which is what assertSync is for, and why it names the
+    // planner it is used on rather than being applied to all of them.
+    for (const p of PIPELINES.filter((p) => p.id !== 'blast')) {
       const ex = p.example!;
       expect(() => assertSync(p.plan(ex.build(), { ...p.defaults, ...ex.options }))).not.toThrow();
     }
+  });
+
+  it('is awaited for the one that reads the pool before it plans', async () => {
+    const blast = PIPELINES.find((p) => p.id === 'blast')!;
+    const planned = await blast.plan(blast.example!.build(), {
+      ...blast.defaults,
+      ...blast.example!.options,
+    });
+    expect(isPlanError(planned)).toBe(false);
+  });
+});
+
+describe('a workflow is one run, not one row per node', () => {
+  // Measured on a real schedd (HTCondor 25.14.1) with a two-node DAG
+  // submitted as `condor_submit_dag -batch-name blastdemo-probe`:
+  //
+  //   Cluster | JobBatchName    | DAGManJobId | Universe
+  //   2       | blastdemo-probe | undefined   | 7  (the manager)
+  //   3       | blastdemo-probe | 2           | 5  (a node)
+  //   4       | blastdemo-probe | 2           | 5
+  //
+  // and the two constraints run against that queue:
+  //
+  //   substr(JobBatchName,0,9) == "blastdemo"                          -> 3 rows
+  //   ... && DAGManJobId is undefined                                  -> 1 row
+  //
+  // DAGMan passes its own -batch-name down to the nodes, so the name
+  // does not separate them: the site saw one BLAST search listed three
+  // times and read it as having been submitted repeatedly.
+  //
+  // What is checked here is the TEXT of the constraint, because that
+  // is all this side owns -- nothing in the browser evaluates ClassAd
+  // expressions, and a hand-written evaluator in a test would only be
+  // asserting that two copies of the same mistake agree. The row count
+  // is checked against a real schedd running a real DAG, in e2e.
+  it('asks the schedd to leave out the jobs DAGMan submitted', () => {
+    expect(ownJobsConstraint()).toMatch(/&& DAGManJobId is undefined$/);
+  });
+
+  it('keeps the pipeline clauses together, so the DAG clause applies to all of them', () => {
+    // `a || b && c` is `a || (b && c)` in ClassAd as in C, so without
+    // the parentheses the first pipeline's jobs would be listed
+    // whether or not they were nodes, and only the last pipeline
+    // would be filtered. Harmless with one pipeline and wrong with
+    // two, which is the kind of bug that arrives with the second.
+    const grouped = /^\((.*)\) && DAGManJobId is undefined$/.exec(ownJobsConstraint())?.[1];
+    expect(grouped).toBeDefined();
+    for (const p of PIPELINES) expect(grouped).toContain(`"${p.batchPrefix}"`);
+    if (PIPELINES.length > 1) expect(grouped).toContain('||');
   });
 });

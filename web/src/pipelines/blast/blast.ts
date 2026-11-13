@@ -192,9 +192,60 @@ export const MAX_DATABASE_BYTES = 2 * 1024 * 1024 * 1024;
 export const QUERIES_PER_NODE = 1;
 
 /** What one node job runs over. */
+/**
+ * The image BLAST runs in where the pool can run one.
+ *
+ * NCBI's own build, pinned. Verified to carry everything the runner
+ * script uses, not just the search binaries:
+ *
+ *   bash env tar gzip gunzip awk sort find wc
+ *   blastn blastp blastx tblastn makeblastdb   (blastn 2.17.0+)
+ *
+ * -- which matters because the runner needs GNU `sort -g` to rank hits
+ * by e-value, and would silently fall back to unsorted output under a
+ * busybox shell. 358 MiB, Ubuntu 22.04.
+ *
+ * A site with its own mirror changes this one line.
+ */
+export const BLAST_IMAGE = 'docker://ncbi/blast:2.17.0';
+
+/**
+ * A machine-ad constraint naming a slot that can run BLAST_IMAGE.
+ *
+ * These two attributes and no others, because they are the ones
+ * condor_submit itself puts in the job's requirements for a
+ * `docker://` image. Taken from a dry run rather than from memory:
+ *
+ *   $ condor_submit -dry-run - blast.sub
+ *   Requirements = ... && TARGET.HasContainer && TARGET.HasDockerURL && ...
+ *
+ * A probe that asks a different question than the matchmaker will
+ * later ask is a probe that can disagree with it, and the way it
+ * disagrees is a job that is planned to run and then never matches.
+ *
+ * The obvious guess -- HasDocker, HasApptainer, HasSingularity -- is
+ * wrong in both directions. HasApptainer is never advertised at all
+ * (an Apptainer install publishes HasSingularity; see
+ * condor_starter.V6.1/starter_v61_main.cpp), and a site can support
+ * containers through a path that publishes neither. Both runtimes set
+ * HasContainer and HasDockerURL, which is the pair to ask for.
+ */
+export const CONTAINER_SLOTS = 'HasContainer is true && HasDockerURL is true';
+
 export interface JobSpec {
   /** This node's name in the DAG. Also what its outputs are named by. */
   node: string;
+  /**
+   * The container image to run in, or undefined to run BLAST as the
+   * pool installed it.
+   *
+   * Undefined is the fallback, not the default: BLAST+ on the PATH of
+   * every execute node is an assumption that holds at the sites that
+   * have a bioinformatics admin and nowhere else, and the runner's
+   * nicest error message is still an error message. See
+   * chooseImage().
+   */
+  image?: string;
   program: ProgramId;
   evalue: string;
   maxHits: number;
@@ -208,6 +259,28 @@ export interface JobSpec {
   databaseBytes: number;
   /** Bytes of this node's queries, for the disk estimate. */
   queryBytes: number;
+}
+
+/**
+ * What to tell someone whose job could not find BLAST.
+ *
+ * Two different situations wearing the same symptom. Without a
+ * container it is the pool that is missing the software and an
+ * administrator has to act. With one, the software was supposed to
+ * arrive with the job, so nothing the reader does to their pool will
+ * help and the honest answer names the image.
+ *
+ * `$1` is the tool the runner looked for, substituted by the shell.
+ */
+export function missingToolAdvice(spec: JobSpec): string {
+  return spec.image
+    ? `This search ran inside ${spec.image}, and $1 was not found in it. ` +
+        'That is a problem with the image rather than with your data or this pool. ' +
+        'Tell whoever maintains this app, and quote the image name above.'
+    : 'The compute node that ran this job does not have $1 installed, and this pool ' +
+        'cannot run containers, so the job could not bring its own copy. Ask your system ' +
+        'administrator either to make the BLAST+ tools available or to enable container ' +
+        'support, then run this search again.';
 }
 
 export function buildRunnerScript(spec: JobSpec): string {
@@ -291,10 +364,12 @@ finish() {
 }
 
 # One line of plain-language advice per failure. "It did not work" is
-# not a message; "ask your administrator for BLAST+" is.
+# not a message; "ask your administrator for BLAST+" is. Which advice
+# is right depends on where BLAST was supposed to come from, so the
+# sentence is chosen when the script is written, not here.
 need() {
   command -v "$1" >/dev/null 2>&1 && return 0
-  finish error "The compute node that ran this job does not have $1 installed. Ask your system administrator to make the BLAST+ tools available on the pool, then run this search again." ${EXIT_NO_BLAST}
+  finish error "${missingToolAdvice(spec)}" ${EXIT_NO_BLAST}
 }
 
 need "$PROGRAM"
@@ -422,6 +497,14 @@ export function buildSubmitFile(spec: JobSpec): string {
   const prepare = outputs.map((f) => `: > ${f}`).join('; ');
 
   return [
+    // In container universe this is the path INSIDE the image, which
+    // is why transfer_executable stays false either way: there is no
+    // executable of ours to send in the first place. /usr/bin/env is
+    // in the image (checked, not assumed) and on any pool that has
+    // BLAST+ installed.
+    ...(spec.image
+      ? [`universe = container`, `container_image = ${spec.image}`]
+      : [`universe = vanilla`]),
     `executable = /usr/bin/env`,
     `transfer_executable = false`,
     `arguments = "bash -c '${prepare}; exec bash ${RUNNER_FILE}'"`,
@@ -452,9 +535,16 @@ export function buildSubmitFile(spec: JobSpec): string {
     ``,
     // No batch_name here. In a DAG the name belongs on the MANAGER
     // job, which is what the app lists -- one row per search rather
-    // than one per query file -- and node jobs are found from it by
-    // DAGManJobId. Setting it per node would name the parts, not the
-    // whole.
+    // than one per query file.
+    //
+    // Leaving it out does NOT keep the name off the nodes, which is
+    // what an earlier version of this comment claimed. DAGMan passes
+    // its own -batch-name down to every node it submits, so the nodes
+    // carry the manager's JobBatchName regardless of this file, and a
+    // queue constraint written on the name alone returns the manager
+    // AND every node -- one search reported as many. What separates
+    // them is DAGManJobId, which only the nodes have; see
+    // ownJobsConstraint in pipelines/index.ts.
     //
     // It would also have been written `JobBatchName = ...`, which is
     // the trap this repository's AGENTS.md warns about: a submit file
@@ -473,3 +563,33 @@ export function batchNameFor(program: ProgramId, when = new Date()): string {
 
 /** True for any batch name this app produces, for the queue constraint. */
 export const BATCH_PREFIX = 'blast-';
+
+/**
+ * Whether this search runs in a container, decided by asking the pool.
+ *
+ * The site that reported this had no BLAST+ on its execute nodes, so
+ * every search returned the runner's "ask your administrator" message.
+ * An example that only works where the software happens to be
+ * installed is not an example.
+ *
+ * So: a container by default, and bare BLAST+ only where the pool says
+ * it cannot run one. The probe is `HasDocker || HasApptainer ||
+ * HasSingularity` over the machine ads -- the pool's own answer, not a
+ * setting somebody has to maintain in a form.
+ *
+ * The three cases, and why the unknown one goes to the container:
+ *
+ *   yes      container universe, the image below
+ *   no       vanilla, BLAST+ from the execute node (the demo pool)
+ *   unknown  container universe -- a pool that will not show its
+ *            machine ads is a real pool, not a laptop, and a modern
+ *            one of those runs containers. Guessing wrong this way
+ *            gives a job that does not match and says so; guessing
+ *            wrong the other way gives one that runs and fails.
+ */
+export async function chooseImage(
+  poolHas: (constraint: string) => Promise<boolean | null>,
+): Promise<string | undefined> {
+  const can = await poolHas(CONTAINER_SLOTS);
+  return can === false ? undefined : BLAST_IMAGE;
+}

@@ -224,13 +224,43 @@ test('a workflow’s results are gathered from every node', async ({ page }) => 
   await expect(page.getByTestId('example-files-database')).toContainText('.fasta');
   await expect(page.getByTestId('example-files-queries')).toContainText('.fasta');
 
+  // Every row in the list, counted BEFORE this run is submitted.
+  // What follows asserts that this submission adds exactly one of
+  // them -- which is the claim, and which counting rows by batch-name
+  // prefix is not: this suite leaves earlier runs of the same
+  // pipeline in the queue, and they are other people's rows as far as
+  // this test is concerned.
+  const rows = page.getByTestId('job-list').locator('li');
+  const before = await rows.count();
+
   await page.getByTestId('submit').click();
   const submitted = page.getByTestId('submitted');
   await expect(submitted).toBeVisible({ timeout: 60_000 });
   const id = (await submitted.innerText()).match(/(\d+\.\d+)/)![1];
 
+  // ONE row for one search, for the whole life of the workflow.
+  //
+  // DAGMan passes its own -batch-name down to the node jobs it
+  // submits, so the nodes carry the manager's JobBatchName and a
+  // constraint written on the name alone returns all of them. A site
+  // saw a single BLAST search listed three times and read it as
+  // having been submitted repeatedly.
+  //
+  // Sampled repeatedly rather than once, because the nodes exist for
+  // only part of the run and one sample can easily miss them. That
+  // nodes existed at all is not asserted here -- it is proven at the
+  // end of this test, by a result that only a node could have
+  // written.
   const toggle = page.getByTestId(`results-toggle-${id}`);
-  await expect(toggle).toBeVisible({ timeout: 260_000 });
+  const deadline = Date.now() + 260_000;
+  while (Date.now() < deadline) {
+    // One more row than before, never more, at any moment of the run.
+    expect(await rows.count()).toBeLessThanOrEqual(before + 1);
+    if (await toggle.count()) break;
+    await page.waitForTimeout(500);
+  }
+
+  await expect(toggle).toBeVisible({ timeout: 10_000 });
   await toggle.click();
 
   const results = page.getByTestId(`results-${id}`);
