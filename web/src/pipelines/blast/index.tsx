@@ -239,6 +239,12 @@ export const blast: Pipeline<BlastOptions> = {
   name: 'BLAST search',
   summary:
     'Search many query files against one database. The database is uploaded once, not once per job.',
+  description: {
+    what: 'Runs a BLAST search of your sequences against your own reference database, as a workflow: the database is spooled once and the searches run beside it.',
+    needs: 'One FASTA database and one or more FASTA files of query sequences. Nucleotide or protein, as long as the program matches.',
+    gives: 'The strongest matches across every search in one table, each search\u2019s full hit table to download, and the raw files.',
+    cost: 'One job per group of queries. The database is uploaded ONCE however many searches run -- which is the whole reason this is a workflow.',
+  },
   batchPrefix: BATCH_PREFIX,
   inputs: [
     {

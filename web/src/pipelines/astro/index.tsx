@@ -181,6 +181,12 @@ export const astro: Pipeline<Options> = {
   id: 'fitsprev',
   name: 'FITS previews',
   summary: 'Statistics and a viewable preview for astronomical images, or a colour composite.',
+  description: {
+    what: 'Reads FITS frames, measures each one (range, mean, median, sky noise, blank pixels) and renders a picture you can look at in the browser -- one per frame, or three combined into a colour composite.',
+    needs: 'FITS files, as they come off the telescope or out of a reduction pipeline. For a colour composite, three frames of the same field.',
+    gives: 'A PNG preview and a table of statistics per frame, plus everything the job produced as a download.',
+    cost: 'One job per preview, a minute or two each. Every frame is uploaded once.',
+  },
   batchPrefix: BATCH_PREFIX,
   inputs: [
     {

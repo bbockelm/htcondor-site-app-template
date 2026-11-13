@@ -14,6 +14,39 @@ export const BATCH_PREFIX = 'fitsprev-';
 
 const REQUEST_CPUS = 1;
 
+/**
+ * The image the job runs in, because the job needs astropy.
+ *
+ * This pipeline used to hope the execute node had astropy installed
+ * and, when it did not, told the user to "ask your system
+ * administrator" -- an answer that is useless to the person reading it
+ * and avoidable, since naming an image is one submit command.
+ *
+ * `continuumio/anaconda3:2024.10-1` carries astropy 6.1.3 and numpy
+ * 1.26.4 on Python 3.12.7, verified by pulling the image and running
+ * it rather than by reading its description. The tag is PINNED:
+ * `latest` is the same manifest digest today and will not be forever,
+ * and an image that changes underneath a pipeline breaks it for
+ * reasons nobody can see from here.
+ *
+ * Anaconda is a four-gigabyte image for two libraries, and a site with
+ * a leaner one of its own should say so here instead -- it is one
+ * line. It is the default because it comes from a long-lived
+ * publisher, it is on Docker Hub where an execute node can reach it,
+ * and anything smaller would be an image this repository had to build
+ * and keep alive.
+ *
+ * `docker://` is not decoration: it is how HTCondor is told this names
+ * a docker-style repository rather than a .sif file or an exploded
+ * directory, and it is also how HTCondor knows never to put the image
+ * through a file-transfer plugin.
+ *
+ * A wrong name here is the worst failure this file can produce: every
+ * job holds with a transfer error that says nothing about the image.
+ * Change it only to something you have pulled and run.
+ */
+export const CONTAINER_IMAGE = 'docker://continuumio/anaconda3:2024.10-1';
+
 export interface JobSpec {
   /** Names in the sandbox, each already passing isSafeFileName. */
   inputNames: string[];
@@ -38,10 +71,19 @@ export function buildSubmitFile(spec: JobSpec): string {
     `# site policy (log location, accounting group) is applied by the access`,
     `# point and is deliberately absent here.`,
     ``,
+    // The job runs inside an image that HAS astropy, rather than
+    // hoping the execute node does and telling the user to ask an
+    // administrator when it does not. `universe = container` is
+    // optional once container_image is set, and stating it makes the
+    // file say what it is.
+    `universe = container`,
+    `container_image = ${quote(CONTAINER_IMAGE)}`,
+    ``,
     // /usr/bin/env, not the Python file: the runner arrives as an input
     // and inputs are uploaded AFTER the job is created, so naming it as
     // the executable would mean submitting against a file that does not
-    // exist yet.
+    // exist yet. In container universe this path is resolved INSIDE the
+    // image, where it is Debian's own /usr/bin/env.
     `executable = /usr/bin/env`,
     `transfer_executable = false`,
     `arguments = "bash -c '${prepare}; exec python3 ${RUNNER_FILE}'"`,

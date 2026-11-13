@@ -4,7 +4,7 @@ import { PASTED_FILE, blast, pastedQueryFile } from './index';
 import { RUNNER_FILE } from './blast';
 import { outputFiles, requestMemoryMB } from './blast';
 import { isSafeFileName } from '../../lib/submit';
-import { isPlanError } from '../types';
+import { assertSync, isPlanError } from '../types';
 
 /** Sequences from a FASTA string, by id. */
 function parseFasta(text: string): Record<string, string> {
@@ -118,15 +118,17 @@ describe('pasted sequences', () => {
 
   it('is searched alongside the uploaded files', () => {
     const files = buildExample();
-    const planned = blast.plan(files, { ...blast.defaults, pasted: 'ACGTACGTACGTACGT' });
+    const planned = assertSync(blast.plan(files, { ...blast.defaults, pasted: 'ACGTACGTACGTACGT' }));
     if (isPlanError(planned) || planned.kind !== 'dag') throw new Error('want a dag');
     expect(planned.uploads.map((u) => u.name)).toContain(PASTED_FILE);
   });
 
   it('is enough on its own, with no query file at all', () => {
-    const planned = blast.plan(
-      { database: buildExample().database, queries: [] },
-      { ...blast.defaults, pasted: '>a\nACGT' },
+    const planned = assertSync(
+      blast.plan(
+        { database: buildExample().database, queries: [] },
+        { ...blast.defaults, pasted: '>a\nACGT' },
+      ),
     );
     expect(isPlanError(planned)).toBe(false);
   });
@@ -144,7 +146,7 @@ describe('what each node of the workflow brings back', () => {
   };
 
   function dagOf(input = many) {
-    const planned = blast.plan(input, blast.defaults);
+    const planned = assertSync(blast.plan(input, blast.defaults));
     if (isPlanError(planned) || planned.kind !== 'dag') throw new Error('want a dag');
     return planned;
   }

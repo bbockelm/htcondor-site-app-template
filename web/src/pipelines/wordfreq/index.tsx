@@ -103,6 +103,12 @@ export const wordFrequency: Pipeline<CountOptions> = {
   id: 'wordfreq',
   name: 'Word frequency',
   summary: 'Count the words in a text file and show the most common.',
+  description: {
+    what: 'Counts how often each word appears in a plain-text file and shows the most common ones, with a bar for the shape of the distribution.',
+    needs: 'One text file: a transcript, a manuscript, a log, anything that is words rather than a spreadsheet.',
+    gives: 'A sortable table of words and counts, the same figures as a plain summary you can paste into an email, and the files themselves to download.',
+    cost: 'One job, seconds of compute. Your file is uploaded once.',
+  },
   // Every job from this pipeline is named exactly this; the shell
   // matches on the prefix, which covers both that and the stamped
   // names the other two pipelines use.

@@ -88,19 +88,24 @@ export function Results({ jobId }: { jobId: string }) {
         </p>
       )}
 
+      {/* phone-cards: at phone width this becomes a list of cards
+          rather than a four-column table, and every cell carries its
+          column's name in data-label so the value still says what it
+          is. phone-sort keeps the two sorting buttons above the cards
+          when the headings themselves go away. See styles.css. */}
       {data && !showText && (
-        <table className="counts" data-testid="results-table">
+        <table className="counts phone-cards phone-sort" data-testid="results-table">
           <thead>
             <tr>
               <th scope="col" className="rank">
                 #
               </th>
-              <th scope="col">
+              <th scope="col" className="sortable">
                 <button type="button" className="sort" onClick={() => toggle('word')}>
                   Word{arrow('word')}
                 </button>
               </th>
-              <th scope="col" className="num">
+              <th scope="col" className="num sortable">
                 <button type="button" className="sort" onClick={() => toggle('count')}>
                   Times used{arrow('count')}
                 </button>
@@ -113,10 +118,16 @@ export function Results({ jobId }: { jobId: string }) {
           <tbody>
             {rows.map((w, i) => (
               <tr key={w.word}>
-                <td className="rank">{i + 1}</td>
-                <td className="word">{w.word}</td>
-                <td className="num">{fmt(w.count)}</td>
-                <td className="num">
+                <td className="rank" data-label="Rank">
+                  {i + 1}
+                </td>
+                <td className="word" data-label="Word">
+                  {w.word}
+                </td>
+                <td className="num" data-label="Times used">
+                  {fmt(w.count)}
+                </td>
+                <td className="num" data-label="Share">
                   {/* A bar as well as a number: the shape of the
                       distribution is the thing people actually look
                       at, and it costs one element. */}

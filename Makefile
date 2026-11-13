@@ -17,6 +17,10 @@ API ?= https://localhost:8443
 # release tag in your own repo.
 API_IMAGE ?= ghcr.io/bbockelm/golang-htcondor:latest
 POOL_IMAGE ?= htcondor/mini:latest
+# The port the demo server listens on, inside the container and out --
+# the same number both sides, which scripts/e2e.sh explains. Override
+# it when 8443 is already taken: `make e2e API_PORT=8843`.
+API_PORT ?= 8443
 # Where demo mode writes its generated passwords, inside the container.
 DEMO_CREDS ?= /tmp/htcondor-demo-credentials.json
 
@@ -76,8 +80,15 @@ bundle: build ## Package dist/$(APP).zip and dist/$(APP).zip.sha256
 	@echo "  Then the operator names the groups that may see it, once, in the"
 	@echo "  access point's configuration: HTTP_API_SITE_APP_$(shell printf '%s' "$(APP)" | tr 'a-z-' 'A-Z_')_GROUPS"
 
+# The variables above are PASSED THROUGH, not just set. Make does not
+# put its own variables in a recipe's environment, and scripts/e2e.sh
+# has defaults of its own -- so `make e2e API_IMAGE=...` changed
+# nothing at all and the suite quietly ran against whatever the script
+# preferred. (CI was unaffected: it sets the variable in the step's
+# own env, which the script does read.)
 e2e: install bundle ## Playwright against a demo API server in Docker
-	./scripts/e2e.sh
+	APP="$(APP)" API_IMAGE="$(API_IMAGE)" POOL_IMAGE="$(POOL_IMAGE)" \
+		API_PORT="$(API_PORT)" DEMO_CREDS="$(DEMO_CREDS)" ./scripts/e2e.sh
 
 # The committed openapi.json is what AGENTS.md tells you to consult
 # instead of guessing at endpoints. It is a copy, so it can rot; this
