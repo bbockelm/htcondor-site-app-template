@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { astro } from './index';
 import { RUNNER_FILE } from './runner';
+import { CONTAINER_IMAGE } from './submit';
 import { MAX_IMAGES } from './fits';
+import { assertSync } from '../types';
 
 function fits(name: string, size = 1024): File {
   const f = new File([new Uint8Array(1)], name, { type: 'application/fits' });
@@ -11,7 +13,7 @@ function fits(name: string, size = 1024): File {
 
 /** The pipeline takes a FileSet now; this one has a single slot. */
 function plan(files: File[], options: typeof astro.defaults) {
-  return astro.plan({ images: files }, options);
+  return assertSync(astro.plan({ images: files }, options));
 }
 
 const each = astro.defaults;
@@ -36,6 +38,25 @@ describe('what the astro pipeline will submit', () => {
     for (const u of planned.uploads) {
       expect(planned.submitFile).toContain(u.name);
     }
+  });
+
+  it('runs in a container that has astropy, instead of hoping for one', () => {
+    // The job needs astropy and numpy. Without an image it ran
+    // wherever it landed and, on a node without them, came back with
+    // "ask your system administrator" -- which is not something the
+    // person reading it can act on.
+    //
+    // The image is PINNED and the `docker://` prefix is what tells
+    // HTCondor this is a docker-style repository rather than a .sif
+    // file or a directory. A tag that drifts, or a missing prefix,
+    // holds every job with a transfer error that names neither.
+    const planned = plan([fits('a.fits')], each);
+    if (planned.kind !== 'job') throw new Error('want a job');
+    expect(planned.submitFile).toMatch(/^universe = container$/m);
+    expect(planned.submitFile).toContain(`container_image = ${CONTAINER_IMAGE}`);
+    expect(CONTAINER_IMAGE).toMatch(/^docker:\/\//);
+    expect(CONTAINER_IMAGE).not.toMatch(/:latest$/);
+    expect(CONTAINER_IMAGE).toMatch(/:[^:/]+$/);
   });
 
   it('declares the outputs it creates', () => {

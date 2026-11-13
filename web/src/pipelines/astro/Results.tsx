@@ -168,7 +168,11 @@ function ImagePanel({ image }: { image: ImageReport }) {
         </dl>
       )}
 
-      <table className="stats">
+      {/* phone-cards: each statistic becomes its own block at phone
+          width. The row header already names the value, so these
+          cells carry no data-label and the value sits plainly under
+          its heading rather than across an empty gutter. */}
+      <table className="stats phone-cards">
         <tbody>
           <Row label="Lowest pixel" value={formatValue(image.min)} />
           <Row label="Highest pixel" value={formatValue(image.max)} />

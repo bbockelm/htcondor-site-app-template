@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildDagFile, buildNodeFiles, planNodes, nodeSubmitName } from './dag';
 import { EXIT_NO_BLAST, RUNNER_FILE, buildRunnerScript, type JobSpec } from './blast';
 import { blast } from './index';
+import { assertSync } from '../types';
 
 const base: Omit<JobSpec, 'queryNames' | 'queryBytes' | 'node'> = {
   program: 'blastn',
@@ -95,7 +96,7 @@ describe('node submit files', () => {
 
 /** The database and the queries are separate slots now. */
 function plan(database: File | null, queries: File[], options = blast.defaults) {
-  return blast.plan({ database: database ? [database] : [], queries }, options);
+  return assertSync(blast.plan({ database: database ? [database] : [], queries }, options));
 }
 
 describe('the plan the shell submits', () => {

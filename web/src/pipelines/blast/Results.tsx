@@ -155,8 +155,11 @@ export function Results({ job }: { job: Job }) {
           </p>
         ))}
 
+      {/* phone-cards: six columns do not fit a phone, so at that width
+          each hit becomes a card and every cell carries its column's
+          name. See styles.css. */}
       {shown.length > 0 ? (
-        <table className="table" data-testid="blast-hits">
+        <table className="table phone-cards" data-testid="blast-hits">
           <thead>
             <tr>
               <th scope="col">Query</th>
@@ -178,12 +181,22 @@ export function Results({ job }: { job: Job }) {
           <tbody>
             {shown.map((h, i) => (
               <tr key={`${h.query_file}-${h.query}-${h.subject}-${i}`}>
-                <td title={h.query_file}>{h.query}</td>
-                <td>{h.subject}</td>
-                <td className="num">{h.identity.toFixed(1)}%</td>
-                <td className="num">{h.length}</td>
-                <td className="num">{h.evalue}</td>
-                <td className="num">{h.bits}</td>
+                <td title={h.query_file} data-label="Query">
+                  {h.query}
+                </td>
+                <td data-label="Subject">{h.subject}</td>
+                <td className="num" data-label="Identity">
+                  {h.identity.toFixed(1)}%
+                </td>
+                <td className="num" data-label="Length">
+                  {h.length}
+                </td>
+                <td className="num" data-label="E">
+                  {h.evalue}
+                </td>
+                <td className="num" data-label="Bits">
+                  {h.bits}
+                </td>
               </tr>
             ))}
           </tbody>

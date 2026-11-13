@@ -22,10 +22,11 @@
 // WHY NO matplotlib AND NO PILLOW
 //
 // Writing a PNG is about twenty lines of zlib and struct, both of which
-// are in the standard library. astropy is a dependency we cannot avoid
-// and can at least name in an error message; adding two more things
-// that might not be on the execute node, to draw a picture we are
-// drawing ourselves anyway, buys nothing. numpy comes with astropy.
+// are in the standard library. astropy is a dependency we cannot
+// avoid, which is why the job names a container image that has it --
+// see submit.ts; adding two more libraries to that image, to draw a
+// picture we are drawing ourselves anyway, buys nothing. numpy comes
+// with astropy.
 
 import type { Options } from './fits';
 import { clipById } from './fits';
@@ -187,10 +188,11 @@ try:
 except ImportError:
     finish(
         "error",
-        "The compute node that ran this job does not have numpy installed. "
-        "numpy comes with astropy, so this usually means neither is available. "
-        "Ask your system administrator to make astropy available on the pool, "
-        "or submit again once it is.",
+        "numpy is missing from the image this job ran in. The job asks for a "
+        "container that has astropy, and numpy comes with astropy, so this "
+        "means it did not get that container -- most likely this pool cannot "
+        "run container jobs. Tell your access point's operator which image the "
+        "job asked for; it is named in the submit file.",
         70,
     )
 
@@ -199,10 +201,11 @@ try:
 except ImportError:
     finish(
         "error",
-        "The compute node that ran this job does not have astropy installed, so it "
-        "could not read the FITS file. Ask your system administrator to make astropy "
-        "available on the pool -- a container image with astropy in it is the usual "
-        "way -- and then submit this again.",
+        "astropy is missing from the image this job ran in, so the FITS file "
+        "could not be read. The job asks for a container that has it, so this "
+        "means it did not get that container -- most likely this pool cannot "
+        "run container jobs. Tell your access point's operator which image the "
+        "job asked for; it is named in the submit file.",
         70,
     )
 except Exception as exc:
