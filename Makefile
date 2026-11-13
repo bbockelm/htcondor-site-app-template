@@ -9,7 +9,12 @@ APP ?= $(notdir $(CURDIR))
 API ?= https://localhost:8443
 # Images used by `make e2e`. Two, because demo mode runs a personal
 # HTCondor and the published API image carries only the Go binary --
-# see the header of scripts/e2e.sh. Pin release tags in your own repo.
+# see the header of scripts/e2e.sh.
+#
+# `latest` is the newest RELEASE of the API server, which is what a
+# site runs. (This repository's own CI overrides it with `devel`, the
+# server's main branch, because the two are developed together.) Pin a
+# release tag in your own repo.
 API_IMAGE ?= ghcr.io/bbockelm/golang-htcondor:latest
 POOL_IMAGE ?= htcondor/mini:latest
 # Where demo mode writes its generated passwords, inside the container.
