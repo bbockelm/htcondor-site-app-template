@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { buildDagFile, buildNodeFiles, planNodes, nodeSubmitName } from './dag';
-import { RUNNER_FILE, type JobSpec } from './blast';
-import { blast, pickDatabase } from './index';
+import { EXIT_NO_BLAST, RUNNER_FILE, buildRunnerScript, type JobSpec } from './blast';
+import { blast } from './index';
 
-const base: Omit<JobSpec, 'queryNames' | 'queryBytes'> = {
+const base: Omit<JobSpec, 'queryNames' | 'queryBytes' | 'node'> = {
   program: 'blastn',
   evalue: '1e-5',
   maxHits: 25,
@@ -93,13 +93,18 @@ describe('node submit files', () => {
   });
 });
 
+/** The database and the queries are separate slots now. */
+function plan(database: File | null, queries: File[], options = blast.defaults) {
+  return blast.plan({ database: database ? [database] : [], queries }, options);
+}
+
 describe('the plan the shell submits', () => {
   const db = sized('nt.fasta.gz', 50 * 1024 * 1024);
   const q1 = sized('reads1.fa', 1024);
   const q2 = sized('reads2.fa', 2048);
 
   it('uploads the database exactly once', () => {
-    const planned = blast.plan([db, q1, q2], blast.defaults);
+    const planned = plan(db, [q1, q2]);
     if (planned.kind !== 'dag') throw new Error(`want a dag, got ${planned.kind}`);
     // The whole reason this pipeline is a DAG. If this ever counts two,
     // the user is pushing the database per job again.
@@ -109,7 +114,7 @@ describe('the plan the shell submits', () => {
   });
 
   it('carries the runner and one submit file per query', () => {
-    const planned = blast.plan([db, q1, q2], blast.defaults);
+    const planned = plan(db, [q1, q2]);
     if (planned.kind !== 'dag') throw new Error('want a dag');
     expect(planned.nodeFiles[RUNNER_FILE]).toContain('#!/bin/bash');
     expect(Object.keys(planned.nodeFiles).filter((n) => n.endsWith('.sub'))).toHaveLength(2);
@@ -120,38 +125,49 @@ describe('the plan the shell submits', () => {
     // one node would silently search the other's sequences.
     const a = sized('reads.fa', 10);
     const b = sized('reads.fa', 20);
-    const planned = blast.plan([db, a, b], blast.defaults);
+    const planned = plan(db, [a, b]);
     expect(planned.kind).toBe('error');
     if (planned.kind === 'error') expect(planned.message).toContain('reads.fa');
   });
 
   it('refuses a query name that is not safe to transfer', () => {
-    const planned = blast.plan([db, sized('$(evil).fa', 10)], blast.defaults);
+    const planned = plan(db, [sized('$(evil).fa', 10)]);
     expect(planned.kind).toBe('error');
   });
 
-  it('asks for a database and queries, not just one file', () => {
-    expect(blast.plan([db], blast.defaults).kind).toBe('error');
+  it('asks for a database when there is none, by name', () => {
+    const planned = plan(null, [q1]);
+    expect(planned.kind).toBe('error');
+    if (planned.kind === 'error') expect(planned.message).toContain('database');
+  });
+
+  it('asks for queries when there are none, by name', () => {
+    const planned = plan(db, []);
+    expect(planned.kind).toBe('error');
+    if (planned.kind === 'error') expect(planned.message).toContain('query');
   });
 });
 
-describe('pickDatabase', () => {
-  it('takes the largest file when the user has not said', () => {
-    const db = sized('big.fasta', 1000);
-    const q = sized('small.fa', 10);
-    expect(pickDatabase([q, db], null)).toBe(db);
+
+describe('retries', () => {
+  it('retries a node, but not the one failure that cannot succeed', () => {
+    // "No BLAST+ on the pool" returns the same answer however many
+    // times it is asked. Retrying it turns a twenty-second answer into
+    // a several-minute one, and the user watches the whole wait.
+    const dag = buildDagFile(planNodes(['a.fa'], [1], base, 1));
+    expect(dag).toMatch(/^RETRY q0 2 UNLESS-EXIT 70$/m);
   });
 
-  it('honours an explicit choice even when it is not the largest', () => {
-    const db = sized('big.fasta', 1000);
-    const chosen = sized('small.fa', 10);
-    expect(pickDatabase([chosen, db], 'small.fa')).toBe(chosen);
-  });
-
-  it('falls back when the chosen name is no longer among the files', () => {
-    // The dropzone can replace files under the selection; a stale name
-    // must not mean "no database".
-    const db = sized('big.fasta', 1000);
-    expect(pickDatabase([db], 'gone.fasta')).toBe(db);
+  it('uses the same code the runner actually exits with', () => {
+    // The DAG line and the runner have to agree. If they drift, the
+    // UNLESS-EXIT excuses nothing and nobody notices except as a slow
+    // failure.
+    const nodes = planNodes(['a.fa'], [1], base, 1);
+    expect(buildDagFile(nodes)).toContain(`UNLESS-EXIT ${EXIT_NO_BLAST}`);
+    // The runner exits with that code when the tool is missing.
+    const runner = buildRunnerScript(nodes[0].spec);
+    expect(runner).toMatch(
+      new RegExp(`does not have \\$1 installed[^\n]*" ${EXIT_NO_BLAST}$`, 'm'),
+    );
   });
 });

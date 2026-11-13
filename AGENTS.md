@@ -66,6 +66,12 @@ What follows from that:
 
   **`POST /api/v1/jobs/dag` submits one**, and it takes everything in a single multipart request: the `.dag`, the node submit files, and the shared input together. That is not a convenience — a workflow's spool is written once, and a file missing from the manager job's `transfer_input_files` is *skipped* at spool time rather than rejected, so a submit-then-upload shape would be accepted and silently drop your database. `api.submitDag` in `web/src/lib/api.ts` does this; `web/src/pipelines/blast` is a worked example.
 
+- **Getting a DAG's results back is its own problem, and two tidy-looking answers do not work.** Every node runs in the *same* directory, so a node writing a fixed `results.json` overwrites its neighbours: silently, with no error and no hold, visible only as a results page missing most of the search. Give each node its own output names — and have the job *write* them. `transfer_output_remaps` looks like the right tool and is a trap: it is honoured when the submit file goes through `condor_submit` and **ignored when DAGMan submits the same file itself**, which is what DAGMan does by default. The attribute lands on the job ad either way, so there is nothing to see.
+
+  Then the page has to find those names again after a reload, when it has a job id and nothing else. Spooling a manifest alongside the workflow does not work either: `GET /api/v1/jobs/{id}/output` returns what the job **produced**, and a file uploaded as an input is not in it — the request answers 404 and a perfectly good search reports as unreadable. Read the output sandbox instead and pick the results out by name. It is one request, it contains only outputs (so it stays small however large the shared input was), and a node that never ran is simply absent. `web/src/lib/tar.ts` and `web/src/pipelines/blast/Results.tsx` do this.
+
+- **`RETRY` the failures worth retrying, and excuse the ones that are not.** An evicted job deserves another go; "this pool has no BLAST+ installed" returns the same answer however many times it is asked. `RETRY node 2 UNLESS-EXIT <code>` is the difference between a twenty-second answer and a several-minute one, with the user watching the whole wait. That means the runner needs a distinct exit code for "this node cannot do the job at all", and the DAG and the runner have to agree on it.
+
 - **A URL in `transfer_input_files` would fix this** — the execute node fetches it, once per node rather than once per job, and a site cache can dedupe it entirely. The submit file is passed through verbatim, so you *can* emit one. But nothing here tells you whether this pool's execute nodes have a working transfer plugin for your scheme, and there is no API that reports it. A control that either works or holds every job with a transfer error, with no way to check first, is worse than the upload. **Ask your access point's operator**, and only then.
 
 **Submit, then upload — and the job is HELD until you do.** The server submits with input spooling on, so between `POST /jobs` and the upload every job sits held under `HoldReasonCode 16` (`SpoolingInput`). That is normal. If your interface renders Held as "stopped" or "failed", it says so about every job the moment the user submits it, which is the first thing they will ever see. `jobStatusLabel` names this case, and `HoldReasonCode` is in `JOB_ATTRS` so it can. `POST /api/v1/jobs` creates the job; `POST /api/v1/jobs/{id}/input/multipart` sends its input files afterwards. Between the two the job sits in a transferring-input state that users read as "stuck". Do not reorder these, and do surface that state as something other than silence.
@@ -114,7 +120,7 @@ web/src/lib/htcondor.ts   where am I, who is looking (platform integration)
 web/src/lib/api.ts        typed API client — extend this, don't bypass it
 web/src/pipelines/        THIS is your science: one directory per pipeline
 web/src/lib/submit.ts     escaping, naming, sizing — shared by all of them
-web/src/app.tsx           the shell: identity, dropzone, submit, job list
+web/src/app.tsx           the shell: identity, pickers, submit, job list, results
 e2e/                      playwright against a real server
 scripts/e2e.sh            starts the server, deploys the bundle, runs the suite
 ```

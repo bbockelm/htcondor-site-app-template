@@ -162,7 +162,18 @@ function fmt(n: number): string {
   return n.toLocaleString();
 }
 
+/**
+ * The bar, as a percentage of its cell.
+ *
+ * Capped well short of the cell because the number sits in the same
+ * cell: at 100% the most common word's share wraps onto its own line
+ * and the top row -- the one everybody reads first -- is the one that
+ * looks broken. Every bar is scaled by the same factor, so the shape
+ * of the distribution is unchanged.
+ */
+const BAR_MAX_PERCENT = 55;
+
 function barWidth(w: { count: number }, rows: { count: number }[]): number {
   const max = rows.length ? Math.max(...rows.map((r) => r.count)) : 0;
-  return max > 0 ? Math.round((w.count / max) * 100) : 0;
+  return max > 0 ? Math.round((w.count / max) * BAR_MAX_PERCENT) : 0;
 }

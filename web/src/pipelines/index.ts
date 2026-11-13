@@ -35,3 +35,31 @@ export const PIPELINES: AnyPipeline[] = [wordFrequency, astro, blast];
 export function pipelineById(id: string): AnyPipeline | undefined {
   return PIPELINES.find((p) => p.id === id);
 }
+
+/**
+ * Which pipeline produced a job, from its batch name.
+ *
+ * A PREFIX match. Two of the three pipelines stamp the time into the
+ * name so one run can be told from another, so the name on the job is
+ * `fitsprev-each-20260112031400` and not `fitsprev`. An earlier shell
+ * compared the whole name against the pipeline id; it matched nothing
+ * for those two, and their jobs never appeared in the list at all.
+ */
+export function pipelineForJob(batchName: unknown): AnyPipeline | undefined {
+  const name = typeof batchName === 'string' ? batchName : '';
+  return PIPELINES.find((p) => name.startsWith(p.batchPrefix));
+}
+
+/**
+ * A queue constraint matching every job this app submitted.
+ *
+ * `substr` rather than `regexp`: the prefixes contain a dash, which is
+ * harmless in a regex, but the next person to add a pipeline will use
+ * a dot or a plus and find that it silently matches more than they
+ * meant. A prefix comparison cannot do that.
+ */
+export function ownJobsConstraint(): string {
+  return PIPELINES.map(
+    (p) => `substr(JobBatchName, 0, ${p.batchPrefix.length}) == "${p.batchPrefix}"`,
+  ).join(' || ');
+}

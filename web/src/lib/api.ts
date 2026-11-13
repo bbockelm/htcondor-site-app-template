@@ -307,6 +307,33 @@ export const api = {
   outputUrl: (jobId: string) => `${BASE}/jobs/${encodeURIComponent(jobId)}/output`,
 
   /**
+   * The job's output sandbox, as the bytes of an uncompressed tar.
+   *
+   * Everything the job PRODUCED, and nothing it was given: an uploaded
+   * input is not in here. That is what makes it the right way to read
+   * a workflow whose output file names were decided at submit time --
+   * see lib/tar.ts, and pipelines/blast, which is why it exists.
+   */
+  outputArchive: async (jobId: string): Promise<Uint8Array> => {
+    const res = await fetch(api.outputUrl(jobId), { credentials: 'include' });
+    if (res.status === 401) {
+      redirectToLogin();
+      throw new ApiError(401, 'Session expired');
+    }
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const body = (await res.json()) as { message?: string; error?: string };
+        detail = body.message ?? body.error ?? detail;
+      } catch {
+        /* not JSON; statusText is the best we have */
+      }
+      throw new ApiError(res.status, detail);
+    }
+    return new Uint8Array(await res.arrayBuffer());
+  },
+
+  /**
    * Site submit templates, if this access point defines any. A template
    * is a submit-file body plus the column names it expects.
    *

@@ -9,9 +9,10 @@
 // the submit file. See wordfreq.ts.
 
 import { isSafeFileName } from '../../lib/submit';
-import type { ControlsProps, Pipeline, PlanResult, ResultsProps } from '../types';
+import type { ControlsProps, FileSet, Pipeline, PlanResult, ResultsProps } from '../types';
 import { BATCH_NAME, buildSubmitFile } from './submit';
 import { Results as WordFreqResults } from './Results';
+import { buildExample } from './example';
 import {
   DEFAULT_OPTIONS,
   INPUT_NAME,
@@ -63,8 +64,8 @@ function Controls({ options, onChange, busy }: ControlsProps<CountOptions>) {
   );
 }
 
-function plan(files: File[], options: CountOptions): PlanResult {
-  const file = files[0];
+function plan(files: FileSet, options: CountOptions): PlanResult {
+  const file = (files.input ?? [])[0];
   if (!file) {
     return { kind: 'error', message: 'Drop a text file to count.' };
   }
@@ -102,10 +103,25 @@ export const wordFrequency: Pipeline<CountOptions> = {
   id: 'wordfreq',
   name: 'Word frequency',
   summary: 'Count the words in a text file and show the most common.',
-  accept: '.txt,.text,.md,text/plain',
-  multiple: false,
-  inputLabel: 'a text file',
+  // Every job from this pipeline is named exactly this; the shell
+  // matches on the prefix, which covers both that and the stamped
+  // names the other two pipelines use.
+  batchPrefix: BATCH_NAME,
+  inputs: [
+    {
+      id: 'input',
+      label: 'Text file',
+      hint: 'One plain-text file. Its words are what gets counted.',
+      accept: '.txt,.text,.md,text/plain',
+      multiple: false,
+    },
+  ],
   defaults: DEFAULT_OPTIONS,
+  example: {
+    label: 'Use an example text instead',
+    note: 'The opening of Darwin’s On the Origin of Species, about 4 KB of ordinary English prose.',
+    build: buildExample,
+  },
   Controls,
   plan,
   Results,

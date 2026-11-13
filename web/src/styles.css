@@ -93,3 +93,43 @@ ul.files li span.name, ul.jobs li span.name { flex: 1; overflow-wrap: anywhere; 
 .notice { padding: .75rem 1rem; border-radius: var(--radius); border: 1px solid var(--line); margin-bottom: 1rem; }
 .notice.error { border-color: var(--err); color: var(--err); }
 .notice.success { border-color: var(--ok); color: var(--ok); }
+
+/* One labelled place to put files. A pipeline with a single slot looks
+   exactly as it did before; one with several gets a heading each. */
+.slot + .slot { margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid var(--line); }
+.slot h3 { font-size: .95rem; margin: 0 0 .15rem; }
+.slot p.meta { margin: 0 0 .6rem; }
+
+label.checkbox { display: flex; align-items: center; gap: .5rem; }
+label.checkbox input { width: auto; margin: 0; }
+label.checkbox span { display: inline; margin: 0; }
+
+textarea {
+  width: 100%; padding: .5rem; font: inherit; font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: .85rem; border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--bg); color: var(--fg); resize: vertical;
+}
+
+/* A job row, and the results panel that opens under it. The row is the
+   flex line; the panel has to sit outside it or it is squeezed into a
+   column. */
+ul.jobs li { display: block; }
+ul.jobs li .job { display: flex; align-items: center; gap: .75rem; }
+
+.results { margin: .75rem 0 .25rem; }
+.results table { border-collapse: collapse; width: 100%; font-size: .85rem; }
+.results th, .results td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid var(--line); }
+.results th { color: var(--muted); font-weight: 600; }
+.results td.num, .results th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.results th .sort { background: none; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer; }
+.results .bar {
+  display: inline-block; height: .55rem; margin-right: .4rem; vertical-align: baseline;
+  background: color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 2px;
+}
+.results pre.report {
+  white-space: pre-wrap; overflow-wrap: anywhere; font-size: .8rem;
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+  padding: .75rem; border-radius: var(--radius);
+}
+.results img { max-width: 100%; height: auto; border-radius: var(--radius); }
+.results .error { color: var(--err); }
