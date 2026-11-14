@@ -4,7 +4,7 @@ import { PASTED_FILE, blast, pastedQueryFile } from './index';
 import { RUNNER_FILE } from './blast';
 import { outputFiles, requestMemoryMB } from './blast';
 import { isSafeFileName } from '../../lib/submit';
-import { assertSync, isPlanError } from '../types';
+import { isPlanError } from '../types';
 
 /** Sequences from a FASTA string, by id. */
 function parseFasta(text: string): Record<string, string> {
@@ -116,19 +116,17 @@ describe('pasted sequences', () => {
     expect(text).toBe('>mine descr\nACGT\n');
   });
 
-  it('is searched alongside the uploaded files', () => {
+  it('is searched alongside the uploaded files', async () => {
     const files = buildExample();
-    const planned = assertSync(blast.plan(files, { ...blast.defaults, pasted: 'ACGTACGTACGTACGT' }));
+    const planned = await blast.plan(files, { ...blast.defaults, pasted: 'ACGTACGTACGTACGT' });
     if (isPlanError(planned) || planned.kind !== 'dag') throw new Error('want a dag');
     expect(planned.uploads.map((u) => u.name)).toContain(PASTED_FILE);
   });
 
-  it('is enough on its own, with no query file at all', () => {
-    const planned = assertSync(
-      blast.plan(
-        { database: buildExample().database, queries: [] },
-        { ...blast.defaults, pasted: '>a\nACGT' },
-      ),
+  it('is enough on its own, with no query file at all', async () => {
+    const planned = await blast.plan(
+      { database: buildExample().database, queries: [] },
+      { ...blast.defaults, pasted: '>a\nACGT' },
     );
     expect(isPlanError(planned)).toBe(false);
   });
@@ -145,17 +143,17 @@ describe('what each node of the workflow brings back', () => {
     ],
   };
 
-  function dagOf(input = many) {
-    const planned = assertSync(blast.plan(input, blast.defaults));
+  async function dagOf(input = many) {
+    const planned = await blast.plan(input, blast.defaults);
     if (isPlanError(planned) || planned.kind !== 'dag') throw new Error('want a dag');
     return planned;
   }
 
-  it('gives every node its own output names, because they share a directory', () => {
+  it('gives every node its own output names, because they share a directory', async () => {
     // A DAG's spool is ONE FLAT DIRECTORY and every node runs in it.
     // With a fixed results.json, node q1 lands on top of q0 and the
     // search silently returns one node's worth of hits.
-    const subs = Object.entries(dagOf().nodeFiles).filter(([n]) => n.endsWith('.sub'));
+    const subs = Object.entries((await dagOf()).nodeFiles).filter(([n]) => n.endsWith('.sub'));
     expect(subs).toHaveLength(3);
 
     const landed = new Set<string>();
@@ -174,22 +172,22 @@ describe('what each node of the workflow brings back', () => {
     expect(landed.size).toBe(3 * outputFiles('q0').length);
   });
 
-  it('never uses transfer_output_remaps, which DAGMan ignores', () => {
+  it('never uses transfer_output_remaps, which DAGMan ignores', async () => {
     // It works through condor_submit and is silently dropped when
     // DAGMan submits the file itself -- which is what DAGMan does by
     // default. The attribute lands on the job ad either way, so the
     // only symptom is files coming back under their original names and
     // overwriting each other.
-    for (const [, body] of Object.entries(dagOf().nodeFiles)) {
+    for (const [, body] of Object.entries((await dagOf()).nodeFiles)) {
       expect(body).not.toContain('transfer_output_remaps');
     }
   });
 
-  it('creates each output before anything can fail', () => {
+  it('creates each output before anything can fail', async () => {
     // HTCondor holds a job whose declared output is missing at the
     // end, and holds it for a transfer error that says nothing about
     // what actually went wrong.
-    for (const [name, body] of Object.entries(dagOf().nodeFiles)) {
+    for (const [name, body] of Object.entries((await dagOf()).nodeFiles)) {
       if (!name.endsWith('.sub')) continue;
       const declared = /^transfer_output_files = (.*)$/m.exec(body)![1].split(',');
       const args = /^arguments = (.*)$/m.exec(body)![1];
@@ -197,11 +195,11 @@ describe('what each node of the workflow brings back', () => {
     }
   });
 
-  it('tells each node which queries are its own', () => {
+  it('tells each node which queries are its own', async () => {
     // ONE runner is spooled for the whole workflow. An earlier version
     // generated it from the FIRST node's spec, so every other node
     // searched a file it had never been given and reported it empty.
-    const dag = dagOf();
+    const dag = (await dagOf());
     const runner = dag.nodeFiles[RUNNER_FILE];
     expect(runner).toContain('BLAST_QUERIES');
     // The one runner must not name any particular query.
@@ -226,8 +224,8 @@ describe('what each node of the workflow brings back', () => {
     expect([...assigned].sort()).toEqual(['a.fasta', 'b.fasta', 'c.fasta']);
   });
 
-  it('names a node’s outputs after the node, so the page can pair them', () => {
-    const dag = dagOf();
+  it('names a node’s outputs after the node, so the page can pair them', async () => {
+    const dag = (await dagOf());
     for (const [name, body] of Object.entries(dag.nodeFiles)) {
       if (!name.endsWith('.sub')) continue;
       const node = /BLAST_NODE=(\S+)/.exec(body)![1];

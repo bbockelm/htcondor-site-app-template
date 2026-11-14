@@ -14,6 +14,7 @@
 // file against a read. The slots below say which is which, and the
 // pipeline no longer has to be clever.
 
+import { api } from '../../lib/api';
 import { isSafeFileName } from '../../lib/submit';
 import type {
   ControlsProps,
@@ -26,6 +27,7 @@ import type {
 import {
   BATCH_PREFIX,
   EVALUES,
+  chooseImage,
   MAX_DATABASE_BYTES,
   MAX_HITS,
   PROGRAMS,
@@ -145,7 +147,7 @@ export function pastedQueryFile(text: string): File | undefined {
   return new File([`${body}\n`], PASTED_FILE, { type: 'text/plain' });
 }
 
-function plan(files: FileSet, options: BlastOptions): PlanResult {
+async function plan(files: FileSet, options: BlastOptions): Promise<PlanResult> {
   const database = (files.database ?? [])[0];
   const pasted = pastedQueryFile(options.pasted);
   const queries = [...(files.queries ?? []), ...(pasted ? [pasted] : [])];
@@ -192,6 +194,12 @@ function plan(files: FileSet, options: BlastOptions): PlanResult {
     seen.add(q.name);
   }
 
+  // Asked once per submission, and asked of the POOL: a container
+  // where this one can run one, the installed BLAST+ where it cannot.
+  // Deliberately after the input checks, so a search that was never
+  // going to be submitted does not query the collector.
+  const image = await chooseImage(api.poolHas);
+
   const dbFile = databaseFileName(database.name);
   const nodes = planNodes(
     queries.map((f) => f.name),
@@ -204,6 +212,7 @@ function plan(files: FileSet, options: BlastOptions): PlanResult {
       databaseKind: databaseKind(database.name),
       databaseFile: dbFile,
       databaseBytes: database.size,
+      image,
     },
     QUERIES_PER_NODE,
   );

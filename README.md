@@ -40,6 +40,17 @@ make bundle
 scp dist/myapp.zip dist/myapp.zip.sha256 ap.example.edu:/etc/condor/webapps/
 ```
 
+Or take the bundle from a release instead of building it. Publishing a release on GitHub builds the app and attaches `myapp.zip` and `myapp.zip.sha256` to it (`.github/workflows/release.yml`), so a site that wants the app downloads two files and copies them across — no clone, no node, no build:
+
+```
+curl -LO https://github.com/<owner>/<repo>/releases/latest/download/myapp.zip
+curl -LO https://github.com/<owner>/<repo>/releases/latest/download/myapp.zip.sha256
+shasum -a 256 -c myapp.zip.sha256
+scp myapp.zip myapp.zip.sha256 ap.example.edu:/etc/condor/webapps/
+```
+
+The release's tag is recorded inside the bundle as its `version`, so the access point's admin page can say which build is published. The asset keeps the plain `myapp.zip` name on purpose — see below.
+
 The bundle's **file name is the app's id**, so `myapp.zip` is served at `/site/myapp/`. Renaming the file deploys the same build as a second, independent app — which is how you stage a new version alongside the running one.
 
 Your operator writes one file beside it, once:
